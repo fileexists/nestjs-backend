@@ -182,5 +182,5 @@ Don't forget to give the project a star! Thanks again!
 5. Open a Pull Request
 ---   
 ## Contact
-For any issues or questions, feel free to get in touch.
+For any issues or questions, feel free to get in touch.\
 Deyvid Manolov - [Telegram](https://t.me/FileExists) - [My Website](https://www.deyvid.dev)
