@@ -64,7 +64,7 @@ export class AuthController {
       throw new UnauthorizedException('Invalid email or password');
     }
   
-    if (existingUser.provider && (existingUser.provider !== 'local' && existingUser.provider !== 'combined')) {
+    if (!existingUser.password && existingUser.provider && existingUser.provider === 'google') {
       throw new UnauthorizedException(
         'Please login via google.'
       );
@@ -86,6 +86,16 @@ export class AuthController {
   
     response.cookie('access_token', token, accessTokenOptions);
     response.cookie('refresh_token', refreshToken, refreshTokenOptions);
+
+    /* 
+      This happens only if a user registers via google, then sets a password (if u provide this functionality) so now the user can login via google and via password
+      The user has to go from provider=google to provider=combined cause now has the googleId and the password
+    */
+    if (existingUser.provider && (existingUser.provider === 'google')) {
+      await this.userService.updateUser(existingUser.id, {
+        provider: 'combined',
+     });
+    }
   
     return response.json({ message: 'Login successful.' });
   }
@@ -115,7 +125,12 @@ export class AuthController {
       });
     }
     else {
-      if(user.password){
+      if(!user.googleId){
+        user = await this.userService.updateUser(user.id, {
+          googleId: req.user.googleId,
+       });
+      }
+      else if(user.password) {
         user = await this.userService.updateUser(user.id, {
           provider: 'combined',
           googleId: req.user.googleId,

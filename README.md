@@ -66,11 +66,19 @@ $ cp .env.sample .env
      GOOGLE_CALLBACK_URL=http://localhost:5000/auth/google/callback
      ```
 ### 🆕 Create default User and Permissions
+#### Local auth (Email & Password)
 To create the default permissions (which are defined in the `scripts/permission.seed.ts`) and a user with email, password and permission:
 ```bash
 # In case you dont need a user you can run the command without passing the parameters
 # If you want you can pass multiple permissions like --permission ADMIN,USER
 npx ts-node scripts/init.ts --email admin@example.com --password mySecurePassword --permission ADMIN
+```
+#### Google Auth
+To create the default permissions (which are defined in the `scripts/permission.seed.ts`) and a user with email and permission:
+```bash
+# In case you dont need a user you can run the command without passing the parameters
+# If you want you can pass multiple permissions like --permission ADMIN,USER
+npx ts-node scripts/init.ts --email admin@example.com --permission ADMIN
 ```
 > [!WARNING]
 > If you change the `USER` permission in the `scripts/permission.seed.ts` make sure to change it in the `auth.controller.ts` too.

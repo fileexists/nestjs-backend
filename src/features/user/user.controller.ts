@@ -1,7 +1,7 @@
 import { Controller, Get, Req, UnauthorizedException } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
 import { Request } from 'express';
-import { UserResponseDto } from 'src/shared/dto/user.dto';
+import { UserResponseDto } from '../../shared/dto/user.dto';
 @ApiBearerAuth('Bearer token')
 @ApiTags('user')
 @Controller('user')

@@ -7,6 +7,7 @@ import { Permissions } from '../../shared/decorators/permissions.decorator';
 @ApiBearerAuth('Bearer token')
 @ApiTags('permission')
 @Controller('permission')
+// @Permissions('admin') Use here or on each endpoint
 export class PermissionController {
     constructor(private readonly permissionService: PermissionService) {}
 
@@ -22,6 +23,7 @@ export class PermissionController {
     @ApiOperation({ summary: 'Create a new permission' })
     @ApiCreatedResponse({ description: 'The permission has been created', type: PermissionDTO })
     @ApiConflictResponse({ description: 'The permission already exists' })
+    @Permissions('admin')
     async create(@Body() createPermissionDto: PermissionDTO) {
       try {
         createPermissionDto.name = createPermissionDto.name.toUpperCase();
@@ -41,6 +43,7 @@ export class PermissionController {
     @ApiNotFoundResponse({ description: 'Permission not found' })
     @ApiInternalServerErrorResponse({ description: 'Internal Server Error' })
     @ApiParam({ name: 'id', type: 'string', description: 'Permission ID to update' })
+    @Permissions('admin')
     async update(
       @Param('id') id: string,
       @Body() updatePermissionDto: UpdatePermissionDTO,
@@ -62,6 +65,7 @@ export class PermissionController {
     @ApiOperation({ summary: 'Delete a permission' })
     @ApiNoContentResponse({ description: 'The permission has been deleted' })
     @ApiParam({ name: 'id', type: 'string', description: 'Permission ID to delete' })
+    @Permissions('admin')
     async remove(@Param('id') id: string, @Res() res: Response) {
       this.permissionService.remove(id);
       return res.status(201).json({ message: 'Permission deleted' });
