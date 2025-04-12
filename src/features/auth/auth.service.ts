@@ -67,10 +67,17 @@ export class AuthService {
     accessTokenOptions: CookieOptions;
     refreshTokenOptions: CookieOptions;
   } {
-    const cookieOptions: CookieOptions = {
+    const refreshOptions: CookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax',
+      path: '/',
+    };
+
+    const cookieOptions: CookieOptions = {
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
     };
 
     return {
@@ -79,7 +86,7 @@ export class AuthService {
         maxAge: ms(this.jwtExpiration),
       },
       refreshTokenOptions: {
-        ...cookieOptions,
+        ...refreshOptions,
         maxAge: ms(this.refreshTokenExpiration),
       },
     };
