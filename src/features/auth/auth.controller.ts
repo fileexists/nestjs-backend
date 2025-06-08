@@ -100,6 +100,39 @@ export class AuthController {
     return response.json({ message: 'Login successful.' });
   }
 
+  @ApiOperation({ summary: "Checks the validity of the user's access token" })
+  @ApiOkResponse({ description: 'The token is valid' })
+  @ApiUnauthorizedResponse({ description: 'User is not authenticated.' })
+  @Get('validate')
+  async validateToken(@Req() request, @Res() response) {
+    const accessToken = request.cookies?.access_token;
+
+    try{
+      await this.authService.verifyJwtToken(accessToken);
+      return response.json({ success: true });
+    }
+    catch(error){
+      const refreshToken = request.cookies?.refresh_token;
+
+      if (!accessToken && !refreshToken) {
+        throw new UnauthorizedException('User is not authenticated.');
+      }
+
+      try {
+        const { token: newAccessToken, refreshToken: newRefreshToken } = await this.authService.refreshTokens(refreshToken);
+        const { accessTokenOptions, refreshTokenOptions } = this.authService.getCookieOptions();
+    
+        response.cookie('access_token', newAccessToken, accessTokenOptions);
+        response.cookie('refresh_token', newRefreshToken, refreshTokenOptions);
+        
+        await this.authService.verifyJwtToken(newAccessToken);
+        return response.json({ success: true });
+      } catch (error) {
+        throw new UnauthorizedException('User is not authenticated.');
+      }
+    }
+  }
+
   @ApiOperation({ summary: 'Redirects to Google authentication' })
   @ApiOkResponse({ description: 'Successfully authenticated with Google.' })
   @Get('google')
