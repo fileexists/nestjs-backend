@@ -109,19 +109,19 @@ It supports:
 > The permissions are automatically converted to **UPPERCASE** during validation. So even if you write them in lowercase in the decorator, it will still work.
 
 #### ➕ AND Logic
-`@Permissions('permission1', 'permission2')`
+`@Permissions(['permission1', 'permission2'])`
 > [!NOTE]
 > Requires both **PERMISSION1** and **PERMISSION2**.
 
 #### 🔁 OR Logic
-`@Permissions(['permission1', 'permission2'])`
+`@Permissions('permission1', 'permission2')`
 > [!NOTE]
 > Requires at least one between **PERMISSION1** and **PERMISSION2**.
 
-#### 🔀 Combined (OR + AND)
+#### 🔀 Combined (AND + OR)
 `@Permissions(['permission1', 'permission2'], 'permission3')`
 > [!NOTE]
-> Requires: (**PERMISSION1** OR **PERMISSION2**) AND **PERMISSION3**.
+> Requires: (**PERMISSION1** AND **PERMISSION2**) OR **PERMISSION3**.
 
 #### 🌟 Wildcard Matching
 `@Permissions('permission_*')`

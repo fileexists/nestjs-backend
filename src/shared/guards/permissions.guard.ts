@@ -1,7 +1,13 @@
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ForbiddenException } from "@nestjs/common";
-import { Reflector } from "@nestjs/core";
-import { UserService } from "../../features/user/user.service";
-import { PermissionDTO } from "../dto/permission.dto";
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+  ForbiddenException
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { UserService } from '../../features/user/user.service';
+import { PermissionDTO } from '../dto/permission.dto';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -12,10 +18,11 @@ export class PermissionsGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const requiredPermissions = this.reflector.get<(string | string[])[]>('permissions', context.getHandler());
-    if (!requiredPermissions) {
+
+    if (!requiredPermissions || requiredPermissions.length === 0) {
       return true;
     }
-  
+
     const request = context.switchToHttp().getRequest();
     const userId = request.user?.id;
 
@@ -23,42 +30,51 @@ export class PermissionsGuard implements CanActivate {
       throw new UnauthorizedException('User is not authenticated.');
     }
 
-    //const userPermissions = await this.usersService.getUserPermissions(userId); Use this if you want to fetch them from the database
-    const userPermissions: PermissionDTO[] = request.user?.permissions; 
+    const userPermissions: PermissionDTO[] = await this.usersService.getUserPermissions(userId) ?? [];
 
-    if (!userPermissions) {
-      throw new UnauthorizedException('User permissions not found');
+    if (!userPermissions || userPermissions.length === 0) {
+      throw new UnauthorizedException('User permissions not found.');
     }
 
-    const userPermissionSet = new Set(userPermissions.map(permission => permission.name.toUpperCase()));
+    const userPermissionSet = new Set(
+      userPermissions.map(p => p.name.toUpperCase())
+    );
 
-    const hasPermission = (permissions: (string | string[])[]) => {
-      return permissions.every(permission =>
-        Array.isArray(permission)
-          ? permission.some(p => this.matchesPermission(p, userPermissionSet))
-          : this.matchesPermission(permission, userPermissionSet)
-      );
+    // We take for granted that ADMIN is the highest permission
+    if (userPermissionSet.has('ADMIN')) {
+      return true;
+    }
+
+    const hasPermission = (permissions: (string | string[])[]): boolean => {
+      return permissions.some(permissionGroup => {
+        const normalizedGroup = Array.isArray(permissionGroup)
+          ? permissionGroup
+          : [permissionGroup];
+
+        return normalizedGroup.every(p =>
+          this.checkPermission(p.toUpperCase(), userPermissionSet)
+        );
+      });
     };
 
-    const permissionCheck = hasPermission(requiredPermissions);
-
-    if (!permissionCheck) {
-      throw new ForbiddenException('You do not have permission to access this resource');
+    if (!hasPermission(requiredPermissions)) {
+      throw new ForbiddenException('You do not have permission to access this resource.');
     }
 
     return true;
   }
 
-  private matchesPermission(permission: string, userPermissions: Set<string>): boolean {
-    const normalizedPermission = permission.toUpperCase();
-
-    if (normalizedPermission.includes('*')) {
-      const regex = new RegExp(`^${normalizedPermission.replace(/\*/g, '.*')}$`);
-      return Array.from(userPermissions).some(userPermission => regex.test(userPermission));
+  private checkPermission(permission: string, userPermissions: Set<string>): boolean {
+    if (userPermissions.has(permission)) {
+      return true;
     }
 
-    return Array.from(userPermissions).some(userPermission => 
-      userPermission.localeCompare(normalizedPermission, undefined, { sensitivity: 'base' }) === 0
-    );
+    // Wildcard support (es: "manage_*")
+    if (permission.includes('*')) {
+      const regex = new RegExp(`^${permission.replace(/\*/g, '.*')}$`);
+      return Array.from(userPermissions).some(userPerm => regex.test(userPerm));
+    }
+
+    return false;
   }
 }

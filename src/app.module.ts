@@ -13,6 +13,7 @@ import { PermissionService } from './features/permission/permission.service';
 import { PermissionModule } from './features/permission/permission.module';
 import { AuthGuard } from './shared/guards/auth.guard';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AppController } from './app.controller';
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -50,5 +51,6 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
     },
     PermissionService,
   ],
+  controllers: [AppController]
 })
 export class AppModule  { }
