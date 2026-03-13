@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, BadRequestException, UnauthorizedException, Res, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, Get, BadRequestException, UnauthorizedException, Res, UseGuards, Req, HttpCode } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { ApiBadRequestResponse, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
 import { UserAuthDTO } from '../../shared/dto/register-user.dto';
@@ -40,7 +40,7 @@ export class AuthController {
       throw new BadRequestException('User already registered');
     }
   
-    const hashedPassword = await this.authService.hashPassword(body.password);
+    const hashedPassword = await this.authService.hashPassword(body.password ?? '');
     const userRole = await this.permissionService.findPermission({ name: 'USER' });
     const newUser = await this.userService.createUser({ 
       email: body.email, 
@@ -53,11 +53,12 @@ export class AuthController {
   }
 
   @ApiOperation({ summary: 'Log in for an existing user' })
-  @ApiCreatedResponse({ description: 'Login was successful.' })
+  @ApiOkResponse({ description: 'Login was successful.' })
   @ApiBadRequestResponse({ description: 'User does not exist' })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials or different login method' })
   @ApiBody({ type: UserAuthDTO })
   @Post('login')
+  // @HttpCode(200)
   async login(@Body() body: UserAuthDTO, @Res() response: Response) {
     const existingUser = await this.userService.getUserByEmail(body.email);
     if (!existingUser) {
@@ -97,7 +98,7 @@ export class AuthController {
      });
     }
   
-    return response.json({ message: 'Login successful.' });
+    return response.status(200).json({ message: 'Login successful.' });
   }
 
   @ApiOperation({ summary: "Checks the validity of the user's access token" })

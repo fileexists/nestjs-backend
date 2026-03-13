@@ -41,7 +41,7 @@ export class AuthGuard implements CanActivate {
       request.user = payload;
       return true;
     } catch (error) {
-      console.error("JWT Verification Failed:", error.message);
+      // console.error("JWT Verification Failed:", error.message);
 
       if (error.name === 'TokenExpiredError') {
         return await this.handleTokenRefresh(request, response);
@@ -78,7 +78,7 @@ export class AuthGuard implements CanActivate {
       request.user = decoded;
       return true;
     } catch (error) {
-      console.error("Refresh token verification failed:", error.message);
+      // console.error("Refresh token verification failed:", error.message);
       throw new UnauthorizedException('User is not authenticated.');
     }
   }

@@ -8,6 +8,7 @@ import { UserModule } from '../user/user.module';
 import { UserService } from '../user/user.service';
 import { PermissionService } from '../permission/permission.service';
 import { GoogleStrategy } from './google.strategy';
+import { StringValue } from 'ms';
 
 @Module({
   imports: [
@@ -19,7 +20,10 @@ import { GoogleStrategy } from './google.strategy';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: configService.get<string>('JWT_EXPIRES_IN') || '1d' },
+        
+        signOptions: { 
+          expiresIn: (configService.get<string>('JWT_EXPIRES_IN') || '1d') as StringValue 
+        },
       }),
     }),    
     UserModule,
@@ -29,7 +33,6 @@ import { GoogleStrategy } from './google.strategy';
     UserService, 
     PermissionService,
     GoogleStrategy,
-    
   ],
   controllers: [AuthController],
   exports: [AuthService],

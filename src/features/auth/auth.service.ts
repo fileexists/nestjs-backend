@@ -3,7 +3,15 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { CookieOptions } from 'express';
 import * as jwt from 'jsonwebtoken';
-import * as ms from 'ms';
+// ms ships as an ESM-only package in v3+. When ts-jest transforms with CJS,
+// `import ms from 'ms'` resolves to the module namespace object rather than
+// the function. This guard handles both interop shapes.
+import * as _ms from 'ms';
+import type { StringValue } from 'ms';
+const ms = (typeof (_ms as unknown as { default: unknown }).default === 'function'
+  ? (_ms as unknown as { default: typeof _ms }).default
+  : _ms) as (value: StringValue) => number;
+
 @Injectable()
 export class AuthService {
   constructor(private jwtService: JwtService) {}
@@ -13,7 +21,6 @@ export class AuthService {
   private readonly jwtExpiration = process.env.JWT_EXPIRATION || '15m';
   private readonly refreshTokenExpiration = process.env.REFRESH_TOKEN_EXPIRATION || '7d';
 
-  
   async hashPassword(password: string): Promise<string> {
     return await bcrypt.hash(password, 10);
   }
@@ -29,7 +36,7 @@ export class AuthService {
       permissions: user.permissions
     }, {
       secret: this.jwtSecret,
-      expiresIn: this.jwtExpiration,
+      expiresIn: this.jwtExpiration as StringValue,
     });
   }  
   
@@ -39,7 +46,7 @@ export class AuthService {
       email: user.email, 
       permissions: user.permissions
     }, this.refreshTokenSecret, {
-      expiresIn: this.refreshTokenExpiration,
+      expiresIn: this.refreshTokenExpiration as StringValue,
     });
   }
 
@@ -83,11 +90,11 @@ export class AuthService {
     return {
       accessTokenOptions: {
         ...cookieOptions,
-        maxAge: ms(this.jwtExpiration),
+        maxAge: ms(this.jwtExpiration as StringValue),
       },
       refreshTokenOptions: {
         ...refreshOptions,
-        maxAge: ms(this.refreshTokenExpiration),
+        maxAge: ms(this.refreshTokenExpiration as StringValue),
       },
     };
   }

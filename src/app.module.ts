@@ -37,17 +37,22 @@ import { AppController } from './app.controller';
   ],
   providers: [
     UserService,
+    // Explicit class providers so tests can override/spy via overrideProvider(GuardClass)
+    AuthGuard,
+    PermissionsGuard,
+    ThrottlerGuard,
+    // APP_GUARD registrations use useExisting to share the same singleton instance
     {
       provide: APP_GUARD,
-      useClass: AuthGuard,
+      useExisting: AuthGuard,
     },
     {
       provide: APP_GUARD,
-      useClass: PermissionsGuard,
+      useExisting: PermissionsGuard,
     },
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard
+      useExisting: ThrottlerGuard,
     },
     PermissionService,
   ],
