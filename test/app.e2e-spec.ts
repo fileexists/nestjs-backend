@@ -2,7 +2,7 @@
  * app.e2e-spec.ts
  *
  * Smoke test – verifies the NestJS application bootstraps without errors
- * when all external dependencies (MySQL, guards) are replaced with mocks.
+ * when all external dependencies (PostgreSQL, guards) are replaced with mocks.
  *
  * Run with: yarn test:e2e
  */
@@ -13,10 +13,10 @@ import * as request from 'supertest';
 import { DataSource } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AppModule } from './../src/app.module';
-import { User } from './../src/database/user.entity';
-import { Permission } from './../src/database/permission.entity';
-import { AuthGuard } from './../src/shared/guards/auth.guard';
-import { PermissionsGuard } from './../src/shared/guards/permissions.guard';
+import { User } from './../src/common/entities/user.entity';
+import { Permission } from './../src/common/entities/permission.entity';
+import { AuthGuard } from './../src/common/guards/auth.guard';
+import { PermissionsGuard } from './../src/common/guards/permissions.guard';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
 describe('AppModule bootstrap (e2e)', () => {
@@ -26,18 +26,29 @@ describe('AppModule bootstrap (e2e)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
-      // Prevent any real MySQL connection
       .overrideProvider(DataSource)
       .useValue({
         initialize: jest.fn().mockResolvedValue(undefined),
         destroy: jest.fn().mockResolvedValue(undefined),
       })
-      // Minimal no-op repositories
       .overrideProvider(getRepositoryToken(User))
-      .useValue({ findOne: jest.fn(), find: jest.fn(), save: jest.fn(), create: jest.fn(), delete: jest.fn(), update: jest.fn() })
+      .useValue({
+        findOne: jest.fn(),
+        find: jest.fn(),
+        save: jest.fn(),
+        create: jest.fn(),
+        delete: jest.fn(),
+        update: jest.fn(),
+      })
       .overrideProvider(getRepositoryToken(Permission))
-      .useValue({ findOne: jest.fn(), find: jest.fn(), save: jest.fn(), create: jest.fn(), delete: jest.fn(), update: jest.fn() })
-      // Always-allow guard stubs
+      .useValue({
+        findOne: jest.fn(),
+        find: jest.fn(),
+        save: jest.fn(),
+        create: jest.fn(),
+        delete: jest.fn(),
+        update: jest.fn(),
+      })
       .overrideProvider(AuthGuard)
       .useValue({ canActivate: () => true } as CanActivate)
       .overrideProvider(PermissionsGuard)
@@ -47,6 +58,7 @@ describe('AppModule bootstrap (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix('api', { exclude: ['health'] });
     await app.init();
   });
 
@@ -54,10 +66,11 @@ describe('AppModule bootstrap (e2e)', () => {
     await app.close();
   });
 
-  it('should start the application and respond to unknown routes with 404 (not 500)', async () => {
-    // A 404 proves the app is up and routing – any 5xx would indicate a crash.
-    await request(app.getHttpServer())
-      .get('/health-check-nonexistent')
-      .expect(404);
+  it('should start and respond to /health with 200', async () => {
+    await request(app.getHttpServer()).get('/health').expect(200);
+  });
+
+  it('should respond to unknown routes with 404 (not 500)', async () => {
+    await request(app.getHttpServer()).get('/non-existent-route').expect(404);
   });
 });

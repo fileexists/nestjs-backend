@@ -3,10 +3,10 @@
  *
  * End-to-end tests for the Auth HTTP layer.  The suite spins up the full
  * NestJS application but replaces every external dependency that would
- * require a live service (MySQL, Google OAuth) with in-memory/mock
+ * require a live service (PostgreSQL, Google OAuth) with in-memory/mock
  * counterparts via NestJS module overrides.
  *
- * Run with:  yarn test:e2e  (or:  npx jest --config ./test/jest-e2e.json)
+ * Run with:  yarn test:e2e
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -18,19 +18,19 @@ import {
 } from '@nestjs/common';
 import * as request from 'supertest';
 import * as cookieParser from 'cookie-parser';
+import * as bcrypt from 'bcrypt';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
 import { AppModule } from '../src/app.module';
-import { User } from '../src/database/user.entity';
-import { Permission } from '../src/database/permission.entity';
-import { AuthService } from '../src/features/auth/auth.service';
-import { AuthGuard } from '../src/shared/guards/auth.guard';
-import { PermissionsGuard } from '../src/shared/guards/permissions.guard';
-
-import { GoogleOAuthGuard } from '../src/shared/guards/google-oauth.guard';
+import { User } from '../src/common/entities/user.entity';
+import { Permission } from '../src/common/entities/permission.entity';
+import { AuthService } from '../src/modules/auth/auth.service';
+import { AuthGuard } from '../src/common/guards/auth.guard';
+import { PermissionsGuard } from '../src/common/guards/permissions.guard';
+import { GoogleOAuthGuard } from '../src/common/guards/google-oauth.guard';
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
@@ -49,6 +49,7 @@ const LOCAL_USER: User = {
   password: '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
   provider: 'local',
   googleId: undefined,
+  tokenVersion: 0,
   permissions: [USER_PERMISSION],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -60,6 +61,7 @@ const GOOGLE_USER: User = {
   password: undefined,
   provider: 'google',
   googleId: 'google-oauth-id-123',
+  tokenVersion: 0,
   permissions: [USER_PERMISSION],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -84,13 +86,14 @@ function resetDb(): void {
 const mockUserRepository = {
   findOne: jest.fn(({ where }: { where: Partial<User> }) => {
     if (where.email) return Promise.resolve(db.get(where.email) ?? null);
-    if (where.id) {
-      return Promise.resolve([...db.values()].find((u) => u.id === where.id) ?? null);
-    }
+    if (where.id)
+      return Promise.resolve(
+        [...db.values()].find((u) => u.id === where.id) ?? null,
+      );
     return Promise.resolve(null);
   }),
   find: jest.fn(() => Promise.resolve([...db.values()])),
-  create: jest.fn((data: Partial<User>) => ({ ...data } as User)),
+  create: jest.fn((data: Partial<User>) => ({ ...data }) as User),
   save: jest.fn((user: User) => {
     const saved: User = {
       id: user.id ?? `generated-uuid-${Date.now()}`,
@@ -98,6 +101,7 @@ const mockUserRepository = {
       password: user.password,
       googleId: user.googleId,
       provider: user.provider,
+      tokenVersion: user.tokenVersion ?? 0,
       permissions: user.permissions ?? [],
       createdAt: user.createdAt ?? new Date(),
       updatedAt: new Date(),
@@ -122,13 +126,12 @@ const mockPermissionRepository = {
     return Promise.resolve(null);
   }),
   find: jest.fn(() => Promise.resolve([USER_PERMISSION])),
-  create: jest.fn((data: Partial<Permission>) => ({ ...data } as Permission)),
+  create: jest.fn((data: Partial<Permission>) => ({ ...data }) as Permission),
   save: jest.fn((p: Permission) => Promise.resolve(p)),
   update: jest.fn(() => Promise.resolve({ affected: 1 })),
   delete: jest.fn(() => Promise.resolve({ affected: 1 })),
 };
 
-/** Minimal no-op TypeORM DataSource – prevents any real MySQL connection. */
 const mockDataSource = {
   initialize: jest.fn().mockResolvedValue(undefined),
   destroy: jest.fn().mockResolvedValue(undefined),
@@ -138,7 +141,10 @@ const mockDataSource = {
 // Bootstrap helpers
 // ---------------------------------------------------------------------------
 
-function buildValidAccessToken(app: INestApplication, userPayload: object): string {
+function buildValidAccessToken(
+  app: INestApplication,
+  userPayload: object,
+): string {
   const jwtService = app.get(JwtService);
   return jwtService.sign(userPayload, {
     secret: process.env.JWT_SECRET ?? 'your_jwt_secret',
@@ -146,16 +152,17 @@ function buildValidAccessToken(app: INestApplication, userPayload: object): stri
   });
 }
 
-async function buildValidRefreshToken(app: INestApplication, user: User): Promise<string> {
+async function buildValidRefreshToken(
+  app: INestApplication,
+  user: User,
+): Promise<string> {
   const authService = app.get(AuthService);
   return authService.generateRefreshToken(user);
 }
 
-/**
- * Helper to spin up an app where the GoogleOAuthGuard is replaced with a stub
- * that injects a synthetic `req.user` profile from Google.
- */
-async function createGoogleOverrideApp(userPayload: unknown): Promise<INestApplication> {
+async function createGoogleOverrideApp(
+  userPayload: unknown,
+): Promise<INestApplication> {
   const googleGuardStub: CanActivate = {
     canActivate: (context: ExecutionContext) => {
       const req = context.switchToHttp().getRequest();
@@ -173,7 +180,6 @@ async function createGoogleOverrideApp(userPayload: unknown): Promise<INestAppli
     .useValue(mockUserRepository)
     .overrideProvider(getRepositoryToken(Permission))
     .useValue(mockPermissionRepository)
-    // Disable throttling
     .overrideProvider('THROTTLER:MODULE_OPTIONS')
     .useValue([{ ttl: 60000, limit: 99999 }])
     .overrideProvider(AuthGuard)
@@ -182,12 +188,12 @@ async function createGoogleOverrideApp(userPayload: unknown): Promise<INestAppli
     .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
     .overrideProvider(ThrottlerGuard)
     .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
-    // GoogleOAuthGuard is a route-level @UseGuards decorator, so overrideGuard works here
     .overrideGuard(GoogleOAuthGuard)
     .useValue(googleGuardStub)
     .compile();
 
   const customApp = moduleFixture.createNestApplication();
+  customApp.setGlobalPrefix('api', { exclude: ['health'] });
   customApp.use(cookieParser());
   await customApp.init();
   return customApp;
@@ -204,18 +210,14 @@ describe('AuthController (e2e)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
-      // Prevent any real MySQL connection
       .overrideProvider(DataSource)
       .useValue(mockDataSource)
-      // In-memory repositories
       .overrideProvider(getRepositoryToken(User))
       .useValue(mockUserRepository)
       .overrideProvider(getRepositoryToken(Permission))
       .useValue(mockPermissionRepository)
-      // Disable throttling so rapid sequential requests don't get 429
       .overrideProvider('THROTTLER:MODULE_OPTIONS')
       .useValue([{ ttl: 60000, limit: 99999 }])
-      // Override guards via their class tokens (now registered as direct providers in AppModule)
       .overrideProvider(AuthGuard)
       .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
       .overrideProvider(PermissionsGuard)
@@ -225,11 +227,11 @@ describe('AuthController (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix('api', { exclude: ['health'] });
     app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }),
     );
-
     await app.init();
   });
 
@@ -237,16 +239,20 @@ describe('AuthController (e2e)', () => {
     resetDb();
     jest.clearAllMocks();
 
-    // Re-wire implementations that clearAllMocks() reset
-    mockUserRepository.findOne.mockImplementation(({ where }: { where: Partial<User> }) => {
-      if (where.email) return Promise.resolve(db.get(where.email) ?? null);
-      if (where.id) {
-        return Promise.resolve([...db.values()].find((u) => u.id === where.id) ?? null);
-      }
-      return Promise.resolve(null);
-    });
+    mockUserRepository.findOne.mockImplementation(
+      ({ where }: { where: Partial<User> }) => {
+        if (where.email) return Promise.resolve(db.get(where.email) ?? null);
+        if (where.id)
+          return Promise.resolve(
+            [...db.values()].find((u) => u.id === where.id) ?? null,
+          );
+        return Promise.resolve(null);
+      },
+    );
     mockUserRepository.find.mockResolvedValue([...db.values()]);
-    mockUserRepository.create.mockImplementation((data: Partial<User>) => ({ ...data } as User));
+    mockUserRepository.create.mockImplementation(
+      (data: Partial<User>) => ({ ...data }) as User,
+    );
     mockUserRepository.save.mockImplementation((user: User) => {
       const saved: User = {
         id: user.id ?? `generated-uuid-${Date.now()}`,
@@ -254,6 +260,7 @@ describe('AuthController (e2e)', () => {
         password: user.password,
         googleId: user.googleId,
         provider: user.provider,
+        tokenVersion: user.tokenVersion ?? 0,
         permissions: user.permissions ?? [],
         createdAt: user.createdAt ?? new Date(),
         updatedAt: new Date(),
@@ -261,20 +268,27 @@ describe('AuthController (e2e)', () => {
       db.set(saved.email, saved);
       return Promise.resolve(saved);
     });
-    mockUserRepository.update.mockImplementation((id: string, data: Partial<User>) => {
-      const existing = [...db.values()].find((u) => u.id === id);
-      if (existing) {
-        Object.assign(existing, data);
-        db.set(existing.email, existing);
-      }
-      return Promise.resolve({ affected: 1 });
-    });
-    mockPermissionRepository.findOne.mockImplementation((query: { where: Partial<Permission> }) => {
-      if (query.where.name === 'USER') return Promise.resolve(USER_PERMISSION);
-      return Promise.resolve(null);
-    });
+    mockUserRepository.update.mockImplementation(
+      (id: string, data: Partial<User>) => {
+        const existing = [...db.values()].find((u) => u.id === id);
+        if (existing) {
+          Object.assign(existing, data);
+          db.set(existing.email, existing);
+        }
+        return Promise.resolve({ affected: 1 });
+      },
+    );
+    mockPermissionRepository.findOne.mockImplementation(
+      (query: { where: Partial<Permission> }) => {
+        if (query.where.name === 'USER')
+          return Promise.resolve(USER_PERMISSION);
+        return Promise.resolve(null);
+      },
+    );
     mockPermissionRepository.find.mockResolvedValue([USER_PERMISSION]);
-    mockPermissionRepository.save.mockImplementation((p: Permission) => Promise.resolve(p));
+    mockPermissionRepository.save.mockImplementation((p: Permission) =>
+      Promise.resolve(p),
+    );
   });
 
   afterAll(async () => {
@@ -282,16 +296,18 @@ describe('AuthController (e2e)', () => {
   });
 
   // =========================================================================
-  // GET /auth/logout
+  // POST /auth/logout
   // =========================================================================
 
-  describe('GET /auth/logout', () => {
+  describe('POST /api/auth/logout', () => {
     it('should return 200 and clear both cookies', async () => {
       const response = await request(app.getHttpServer())
-        .get('/auth/logout')
+        .post('/api/auth/logout')
         .expect(200);
 
-      expect(response.body.message).toBe('User has been logged out successfully.');
+      expect(response.body.message).toBe(
+        'User has been logged out successfully.',
+      );
 
       const setCookieHeaders: string[] =
         (response.headers['set-cookie'] as unknown as string[]) ?? [];
@@ -308,7 +324,7 @@ describe('AuthController (e2e)', () => {
   describe('POST /auth/register', () => {
     it('should return 201 and the new userId when registering a brand-new email', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/register')
+        .post('/api/auth/register')
         .send({ email: 'newuser@example.com', password: 'StrongPass1!' })
         .expect(201);
 
@@ -319,7 +335,7 @@ describe('AuthController (e2e)', () => {
 
     it('should store a bcrypt-hashed password (not plain text) in the repository', async () => {
       await request(app.getHttpServer())
-        .post('/auth/register')
+        .post('/api/auth/register')
         .send({ email: 'hashed@example.com', password: 'PlainText123' })
         .expect(201);
 
@@ -330,7 +346,7 @@ describe('AuthController (e2e)', () => {
 
     it('should assign the USER permission to the newly created account', async () => {
       await request(app.getHttpServer())
-        .post('/auth/register')
+        .post('/api/auth/register')
         .send({ email: 'withperm@example.com', password: 'Pass1234!' })
         .expect(201);
 
@@ -340,26 +356,11 @@ describe('AuthController (e2e)', () => {
 
     it('should return 400 when the email is already registered', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/register')
+        .post('/api/auth/register')
         .send({ email: LOCAL_USER.email, password: 'AnyPassword1' })
         .expect(400);
 
       expect(response.body.message).toBe('User already registered');
-    });
-
-    // TODO: Update the DTO with @IsEmail() and @IsNotEmpty() for password,
-    // then change this test to assert a 400 Bad Request instead of allowing it.
-    it('should register a user even with an undefined email (pending DTO validation fix)', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/auth/register')
-        .send({})
-        .expect((res) => {
-          expect(res.status).toBeLessThan(500);
-        });
-
-      if (response.status === 201) {
-        expect(response.body.message).toBe('User registered successfully');
-      }
     });
   });
 
@@ -370,11 +371,11 @@ describe('AuthController (e2e)', () => {
   describe('POST /auth/login', () => {
     it('should return 200 and set access_token + refresh_token cookies on valid credentials', async () => {
       const plainPassword = 'icRIIke.';
-      const hash = await new AuthService(new JwtService()).hashPassword(plainPassword);
+      const hash = await bcrypt.hash(plainPassword, 10);
       db.set(LOCAL_USER.email, { ...LOCAL_USER, password: hash });
 
       const response = await request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/api/auth/login')
         .send({ email: LOCAL_USER.email, password: plainPassword })
         .expect(200);
 
@@ -389,7 +390,7 @@ describe('AuthController (e2e)', () => {
 
     it('should return 401 when the email does not exist', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/api/auth/login')
         .send({ email: 'nobody@example.com', password: 'anything' })
         .expect(401);
 
@@ -398,7 +399,7 @@ describe('AuthController (e2e)', () => {
 
     it('should return 401 when the password is incorrect', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/api/auth/login')
         .send({ email: LOCAL_USER.email, password: 'WrongPassword!' })
         .expect(401);
 
@@ -407,7 +408,7 @@ describe('AuthController (e2e)', () => {
 
     it('should return 401 when a Google-only user tries to login with a password', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/api/auth/login')
         .send({ email: GOOGLE_USER.email, password: 'anypassword' })
         .expect(401);
 
@@ -416,12 +417,16 @@ describe('AuthController (e2e)', () => {
 
     it('should update provider to "combined" when a google user logs in with a password', async () => {
       const password = 'Password1!';
-      const hash = await new AuthService(new JwtService()).hashPassword(password);
-      const combinedUser: User = { ...GOOGLE_USER, password: hash, provider: 'google' };
+      const hash = await bcrypt.hash(password, 10);
+      const combinedUser: User = {
+        ...GOOGLE_USER,
+        password: hash,
+        provider: 'google',
+      };
       db.set(combinedUser.email, combinedUser);
 
       await request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/api/auth/login')
         .send({ email: combinedUser.email, password })
         .expect(200);
 
@@ -431,7 +436,7 @@ describe('AuthController (e2e)', () => {
 
     it('should return 401 when the request body is missing the password field', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/api/auth/login')
         .send({ email: LOCAL_USER.email })
         .expect(401);
 
@@ -452,7 +457,7 @@ describe('AuthController (e2e)', () => {
       });
 
       const response = await request(app.getHttpServer())
-        .get('/auth/validate')
+        .get('/api/auth/validate')
         .set('Cookie', [`access_token=${token}`])
         .expect(200);
 
@@ -460,16 +465,14 @@ describe('AuthController (e2e)', () => {
     });
 
     it('should return 401 when no tokens are present at all', async () => {
-      await request(app.getHttpServer())
-        .get('/auth/validate')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/auth/validate').expect(401);
     });
 
     it('should refresh tokens and return { success: true } when only a valid refresh_token cookie is present', async () => {
       const refreshToken = await buildValidRefreshToken(app, LOCAL_USER);
 
       const response = await request(app.getHttpServer())
-        .get('/auth/validate')
+        .get('/api/auth/validate')
         .set('Cookie', [`refresh_token=${refreshToken}`])
         .expect(200);
 
@@ -484,14 +487,16 @@ describe('AuthController (e2e)', () => {
 
     it('should return 401 when both the access_token and refresh_token are expired/invalid', async () => {
       await request(app.getHttpServer())
-        .get('/auth/validate')
-        .set('Cookie', ['access_token=invalid.token; refresh_token=invalid.refresh'])
+        .get('/api/auth/validate')
+        .set('Cookie', [
+          'access_token=invalid.token; refresh_token=invalid.refresh',
+        ])
         .expect(401);
     });
 
     it('should return 401 when only a malformed access_token is present and no refresh_token exists', async () => {
       await request(app.getHttpServer())
-        .get('/auth/validate')
+        .get('/api/auth/validate')
         .set('Cookie', ['access_token=this.is.garbage'])
         .expect(401);
     });
@@ -504,7 +509,7 @@ describe('AuthController (e2e)', () => {
   describe('GET /auth/google', () => {
     it('should redirect to the Google OAuth consent page (302)', async () => {
       const response = await request(app.getHttpServer())
-        .get('/auth/google')
+        .get('/api/auth/google')
         .redirects(0);
 
       expect([301, 302, 303, 307, 308]).toContain(response.status);
@@ -524,10 +529,12 @@ describe('AuthController (e2e)', () => {
       });
 
       const response = await request(overriddenApp.getHttpServer())
-        .get('/auth/google/callback')
+        .get('/api/auth/google/callback')
         .expect(200);
 
-      expect(response.body.message).toBe('Authentication with google was successful.');
+      expect(response.body.message).toBe(
+        'Authentication with google was successful.',
+      );
 
       const cookies: string[] =
         (response.headers['set-cookie'] as unknown as string[]) ?? [];
@@ -537,7 +544,10 @@ describe('AuthController (e2e)', () => {
     });
 
     it('should update googleId and return 200 when an existing local user signs in with Google', async () => {
-      const localUserWithoutGoogle: User = { ...LOCAL_USER, googleId: undefined };
+      const localUserWithoutGoogle: User = {
+        ...LOCAL_USER,
+        googleId: undefined,
+      };
       db.set(LOCAL_USER.email, localUserWithoutGoogle);
 
       const overriddenApp = await createGoogleOverrideApp({
@@ -547,10 +557,12 @@ describe('AuthController (e2e)', () => {
       });
 
       const response = await request(overriddenApp.getHttpServer())
-        .get('/auth/google/callback')
+        .get('/api/auth/google/callback')
         .expect(200);
 
-      expect(response.body.message).toBe('Authentication with google was successful.');
+      expect(response.body.message).toBe(
+        'Authentication with google was successful.',
+      );
 
       await overriddenApp.close();
     });

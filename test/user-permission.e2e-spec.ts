@@ -6,15 +6,12 @@
  * Strategy
  * --------
  * • AppModule is imported so the full NestJS DI graph is wired up.
- * • TypeORM's DataSource is overridden so NO real MySQL connection is made.
+ * • TypeORM's DataSource is overridden so NO real PostgreSQL connection is made.
  * • The User and Permission repositories are replaced with in-memory mocks.
  * • All three APP_GUARD providers (AuthGuard, PermissionsGuard, ThrottlerGuard)
  *   are overridden individually by class so NestJS replaces every registration.
- * • The AuthGuard stub is "smart": it decodes the access_token cookie (using
- *   JwtService.decode — no verification needed in tests) and populates
- *   req.user, faithfully mimicking what the real guard does. This lets the
- *   200-OK tests work while the 401 test (no cookie → req.user stays undefined
- *   → controller throws) also works correctly.
+ * • The AuthGuard stub decodes the access_token cookie (using JwtService.decode
+ *   — no verification needed in tests) and populates req.user.
  *
  * Run with:  yarn test:e2e
  */
@@ -33,10 +30,10 @@ import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
 
 import { AppModule } from '../src/app.module';
-import { User } from '../src/database/user.entity';
-import { Permission } from '../src/database/permission.entity';
-import { AuthGuard } from '../src/shared/guards/auth.guard';
-import { PermissionsGuard } from '../src/shared/guards/permissions.guard';
+import { User } from '../src/common/entities/user.entity';
+import { Permission } from '../src/common/entities/permission.entity';
+import { AuthGuard } from '../src/common/guards/auth.guard';
+import { PermissionsGuard } from '../src/common/guards/permissions.guard';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
 // ---------------------------------------------------------------------------
@@ -44,18 +41,20 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 // ---------------------------------------------------------------------------
 
 const USER_PERMISSION: Permission = {
-  id: 'perm-user-uuid',
+  id: '11111111-1111-4111-a111-111111111111',
   name: 'USER',
   description: 'Default user permission',
   users: [],
 };
 
 const ADMIN_PERMISSION: Permission = {
-  id: 'perm-admin-uuid',
+  id: '22222222-2222-4222-b222-222222222222',
   name: 'ADMIN',
   description: 'Administrator permission',
   users: [],
 };
+
+const NON_EXISTENT_UUID = '99999999-9999-4999-9999-999999999999';
 
 const REGULAR_USER: User = {
   id: 'regular-user-uuid',
@@ -63,6 +62,7 @@ const REGULAR_USER: User = {
   password: 'hashed',
   provider: 'local',
   googleId: undefined,
+  tokenVersion: 0,
   permissions: [USER_PERMISSION],
   createdAt: new Date('2024-01-01T00:00:00.000Z'),
   updatedAt: new Date('2024-01-01T00:00:00.000Z'),
@@ -74,6 +74,7 @@ const ADMIN_USER: User = {
   password: 'hashed',
   provider: 'local',
   googleId: undefined,
+  tokenVersion: 0,
   permissions: [ADMIN_PERMISSION],
   createdAt: new Date('2024-01-01T00:00:00.000Z'),
   updatedAt: new Date('2024-01-01T00:00:00.000Z'),
@@ -102,7 +103,7 @@ function resetDbs(): void {
 const mockUserRepository = {
   findOne: jest.fn(),
   find: jest.fn(),
-  create: jest.fn((data: Partial<User>) => ({ ...data } as User)),
+  create: jest.fn((data: Partial<User>) => ({ ...data }) as User),
   save: jest.fn(),
   update: jest.fn(),
   delete: jest.fn((id: string) => {
@@ -114,7 +115,7 @@ const mockUserRepository = {
 const mockPermissionRepository = {
   findOne: jest.fn(),
   find: jest.fn(),
-  create: jest.fn((data: Partial<Permission>) => ({ ...data } as Permission)),
+  create: jest.fn((data: Partial<Permission>) => ({ ...data }) as Permission),
   save: jest.fn(),
   update: jest.fn(() => Promise.resolve({ affected: 1 })),
   delete: jest.fn((id: string) => {
@@ -143,45 +144,30 @@ describe('User & Permission Controllers (e2e)', () => {
   let jwtService: JwtService;
 
   beforeAll(async () => {
-    // ------------------------------------------------------------------
-    // 1. Build the module overriding external deps and all guards.
-    //    Now that AppModule registers AuthGuard/PermissionsGuard/ThrottlerGuard
-    //    as direct class providers (with useExisting APP_GUARD), overrideProvider
-    //    correctly replaces both the class token AND the APP_GUARD delegation.
-    // ------------------------------------------------------------------
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
-      // ── Prevent any real MySQL connection ──────────────────────────
       .overrideProvider(DataSource)
       .useValue({
         initialize: jest.fn().mockResolvedValue(undefined),
         destroy: jest.fn().mockResolvedValue(undefined),
       })
-      // ── In-memory repositories ────────────────────────────────────
       .overrideProvider(getRepositoryToken(User))
       .useValue(mockUserRepository)
       .overrideProvider(getRepositoryToken(Permission))
       .useValue(mockPermissionRepository)
-      // ── Guard overrides ────────────────────────────────────────────
       .overrideProvider(ThrottlerGuard)
       .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
       .overrideProvider(PermissionsGuard)
       .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
       .compile();
 
-    // ------------------------------------------------------------------
-    // 2. Grab JwtService BEFORE createNestApplication so the guard
-    //    closure below can use it.
-    // ------------------------------------------------------------------
     jwtService = moduleFixture.get<JwtService>(JwtService);
 
-    // Smart AuthGuard stub: decode the cookie token and set req.user so
-    // the controller can read it – without doing real JWT verification.
-    // Set AFTER compile() so jwtService is available.
     const authGuardRef = moduleFixture.get<AuthGuard>(AuthGuard);
-    jest.spyOn(authGuardRef, 'canActivate').mockImplementation(
-      async (ctx: ExecutionContext) => {
+    jest
+      .spyOn(authGuardRef, 'canActivate')
+      .mockImplementation(async (ctx: ExecutionContext) => {
         const req = ctx.switchToHttp().getRequest();
         const token: string | undefined = req.cookies?.access_token;
         if (token) {
@@ -192,15 +178,14 @@ describe('User & Permission Controllers (e2e)', () => {
           }
         }
         return true;
-      },
-    );
+      });
 
     app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix('api', { exclude: ['health'] });
     app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }),
     );
-
     await app.init();
   });
 
@@ -208,7 +193,6 @@ describe('User & Permission Controllers (e2e)', () => {
     resetDbs();
     jest.clearAllMocks();
 
-    // Re-wire mock implementations after clearAllMocks resets them.
     mockUserRepository.findOne.mockImplementation(
       ({ where }: { where: Partial<User> }) => {
         if (where.id) return Promise.resolve(userDb.get(where.id) ?? null);
@@ -222,7 +206,7 @@ describe('User & Permission Controllers (e2e)', () => {
     );
     mockUserRepository.find.mockResolvedValue([...userDb.values()]);
     mockUserRepository.create.mockImplementation(
-      (data: Partial<User>) => ({ ...data } as User),
+      (data: Partial<User>) => ({ ...data }) as User,
     );
     mockUserRepository.save.mockImplementation((u: User) => {
       const saved: User = {
@@ -231,6 +215,7 @@ describe('User & Permission Controllers (e2e)', () => {
         password: u.password,
         googleId: u.googleId,
         provider: u.provider,
+        tokenVersion: u.tokenVersion ?? 0,
         permissions: u.permissions ?? [],
         createdAt: u.createdAt ?? new Date(),
         updatedAt: new Date(),
@@ -264,13 +249,10 @@ describe('User & Permission Controllers (e2e)', () => {
     );
     mockPermissionRepository.find.mockResolvedValue([...permDb.values()]);
     mockPermissionRepository.create.mockImplementation(
-      (data: Partial<Permission>) => ({ ...data } as Permission),
+      (data: Partial<Permission>) => ({ ...data }) as Permission,
     );
     mockPermissionRepository.save.mockImplementation((p: Permission) => {
-      const saved: Permission = {
-        ...p,
-        id: p.id ?? `gen-perm-${Date.now()}`,
-      };
+      const saved: Permission = { ...p, id: p.id ?? `gen-perm-${Date.now()}` };
       permDb.set(saved.id, saved);
       return Promise.resolve(saved);
     });
@@ -293,7 +275,7 @@ describe('User & Permission Controllers (e2e)', () => {
       const token = buildAccessToken(jwtService, REGULAR_USER);
 
       const response = await request(app.getHttpServer())
-        .get('/user/me')
+        .get('/api/user/me')
         .set('Cookie', [`access_token=${token}`])
         .expect(200);
 
@@ -302,10 +284,8 @@ describe('User & Permission Controllers (e2e)', () => {
     });
 
     it('should return 401 when no access token is provided', async () => {
-      // No cookie → guard stub leaves req.user undefined →
-      // controller throws UnauthorizedException.
       const response = await request(app.getHttpServer())
-        .get('/user/me')
+        .get('/api/user/me')
         .expect(401);
 
       expect(response.body.message).toBe('User is not authenticated.');
@@ -315,7 +295,7 @@ describe('User & Permission Controllers (e2e)', () => {
       const token = buildAccessToken(jwtService, ADMIN_USER);
 
       const response = await request(app.getHttpServer())
-        .get('/user/me')
+        .get('/api/user/me')
         .set('Cookie', [`access_token=${token}`])
         .expect(200);
 
@@ -332,7 +312,7 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should return all permissions from the repository', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .get('/permission')
+        .get('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .expect(200);
 
@@ -343,7 +323,7 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should include both USER and ADMIN permissions in the response', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .get('/permission')
+        .get('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .expect(200);
 
@@ -358,7 +338,7 @@ describe('User & Permission Controllers (e2e)', () => {
 
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .get('/permission')
+        .get('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .expect(200);
 
@@ -374,7 +354,7 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should create a new permission with the name uppercased and return 201', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .post('/permission')
+        .post('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ name: 'moderator', description: 'Can moderate content' })
         .expect(201);
@@ -387,9 +367,9 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should uppercase the permission name before persisting it', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       await request(app.getHttpServer())
-        .post('/permission')
+        .post('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
-        .send({ name: 'viewer' })
+        .send({ name: 'viewer', description: 'Viewer permission' })
         .expect(201);
 
       const saveCallArg = mockPermissionRepository.save.mock
@@ -397,18 +377,20 @@ describe('User & Permission Controllers (e2e)', () => {
       expect(saveCallArg.name).toBe('VIEWER');
     });
 
-    it('should return 409 when the repository raises a duplicate-entry error', async () => {
+    it('should return 409 when the repository raises a duplicate-entry error (PostgreSQL code 23505)', async () => {
       const dbError: Error & { code?: string } = Object.assign(
         new Error('Duplicate entry'),
-        { code: 'ER_DUP_ENTRY' },
+        {
+          code: '23505',
+        },
       );
       mockPermissionRepository.save.mockRejectedValueOnce(dbError);
 
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .post('/permission')
+        .post('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
-        .send({ name: 'USER' })
+        .send({ name: 'USER', description: 'User role' })
         .expect(409);
 
       expect(response.body.message).toMatch(/already exists/);
@@ -421,9 +403,9 @@ describe('User & Permission Controllers (e2e)', () => {
 
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .post('/permission')
+        .post('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
-        .send({ name: 'BROKEN' })
+        .send({ name: 'BROKEN', description: 'Broken perm' })
         .expect(500);
 
       expect(response.body.message).toBe('Error creating permission');
@@ -438,7 +420,7 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should update an existing permission and return 200 with the updated entity', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .put(`/permission/${USER_PERMISSION.id}`)
+        .put(`/api/permission/${USER_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ description: 'Updated description' })
         .expect(200);
@@ -450,7 +432,7 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should return 404 when the permission id does not exist', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .put('/permission/non-existent-uuid')
+        .put(`/api/permission/${NON_EXISTENT_UUID}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ description: 'Anything' })
         .expect(404);
@@ -461,7 +443,7 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should return 400 when sent a non-string name (class-validator on UpdatePermissionDTO)', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       await request(app.getHttpServer())
-        .put(`/permission/${USER_PERMISSION.id}`)
+        .put(`/api/permission/${USER_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ name: 1234 })
         .expect(400);
@@ -470,7 +452,7 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should accept a partial body (all UpdatePermissionDTO fields are optional)', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .put(`/permission/${ADMIN_PERMISSION.id}`)
+        .put(`/api/permission/${ADMIN_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ description: 'Elevated access' })
         .expect(200);
@@ -484,12 +466,12 @@ describe('User & Permission Controllers (e2e)', () => {
   // =========================================================================
 
   describe('DELETE /permission/:id', () => {
-    it('should delete a permission and return 201 with a confirmation message', async () => {
+    it('should delete a permission and return 200 with a confirmation message', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .delete(`/permission/${USER_PERMISSION.id}`)
+        .delete(`/api/permission/${USER_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
-        .expect(201);
+        .expect(200);
 
       expect(response.body.message).toBe('Permission deleted');
     });
@@ -497,23 +479,23 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should call repository.delete with the correct id', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       await request(app.getHttpServer())
-        .delete(`/permission/${ADMIN_PERMISSION.id}`)
+        .delete(`/api/permission/${ADMIN_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
-        .expect(201);
+        .expect(200);
 
       expect(mockPermissionRepository.delete).toHaveBeenCalledWith(
         ADMIN_PERMISSION.id,
       );
     });
 
-    it('should return 201 even when the id does not exist (silent delete behaviour)', async () => {
+    it('should return 404 when the permission id does not exist', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
       const response = await request(app.getHttpServer())
-        .delete('/permission/non-existent-uuid')
+        .delete(`/api/permission/${NON_EXISTENT_UUID}`)
         .set('Cookie', [`access_token=${adminToken}`])
-        .expect(201);
+        .expect(404);
 
-      expect(response.body.message).toBe('Permission deleted');
+      expect(response.body.message).toMatch(/not found/i);
     });
   });
 });

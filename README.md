@@ -1,186 +1,343 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Auth Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A production-ready authentication backend built with **NestJS 11**, **TypeORM**, and **PostgreSQL**.
 
-<p align="center">A secure, scalable authentication backend built with <strong>NestJS</strong> and <strong>TypeORM</strong>.</p>
+## Features
 
-## 🔐 NestJS Backend
-Features:
-
-- ✅ JWT authentication
-- 🔁 Refresh token rotation
-- 🛡️ Role-based and permission-based access control
-- 🔒 OAuth2 login with Google
-- 🧠 Custom decorators for permission logic
-- 📁 MySQL support with TypeORM
-
-Perfect as a plug-and-play backend for your modern web apps.
+- JWT authentication with automatic refresh-token rotation
+- Google OAuth2 via Passport.js
+- Role-based access control (RBAC) with a flexible `@Permissions()` decorator
+- PostgreSQL + TypeORM with migration support
+- Helmet security headers, rate limiting, global validation
+- Swagger/OpenAPI documentation
+- Full unit and e2e test suite (Jest + Supertest)
 
 ---
 
-### 📦 Stack
-- **NestJS**
-- **TypeORM**
-- **JWT & Passport**
-- **MySQL**
-- **Google OAuth2**
-- **Role & Permission decorators**
+## Stack
 
-## Project setup
-### 📚 Install the dependencies
-```bash
-# Install the dependencies
-$ npm install
-```
-### 📄 Create your .env
-```bash
-# Then copy the `.env.sample` to `.env` and fill in the required values.
-$ cp .env.sample .env
-```
-### 🔧 Google OAuth2 Setup
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. In the top bar, click the **Project selector** and create a new project (or select an existing one).
-3. In the left sidebar, navigate to **APIs & Services** → **OAuth consent screen**:
-   - Select the **External** user type.
-   - Fill in the **App name**, **User support email**, and **Developer contact info**.
-   - Click **Save and Continue** (you can skip scopes for now).
-4. Go to **APIs & Services** → **Credentials**:
-   - Click **+ Create Credentials** → **OAuth client ID**.
-   - Select **Web application**.
-   - Set a name, e.g., **NestJS Auth Backend**.
-   - Under **Authorized redirect URIs**, add your backend redirect URL:
-     ```bash
-     # (replace with your production URL if deploying)
-     http://localhost:5000/auth/google/callback
-     ```
-   - Click **Create**.
-5. After creating the OAuth client:
-   - Copy the **Client ID** and **Client Secret**.
-   - Add them to your `.env` file:
-     ```bash
-     GOOGLE_CLIENT_ID=your-client-id
-     GOOGLE_CLIENT_SECRET=your-client-secret
-     GOOGLE_CALLBACK_URL=http://localhost:5000/auth/google/callback
-     ```
-### 🆕 Create default User and Permissions
-#### Local auth (Email & Password)
-To create the default permissions (which are defined in the `scripts/permission.seed.ts`) and a user with email, password and permission:
-```bash
-# In case you dont need a user you can run the command without passing the parameters
-# If you want you can pass multiple permissions like --permission ADMIN,USER
-npx ts-node scripts/init.ts --email admin@example.com --password mySecurePassword --permission ADMIN
-```
-#### Google Auth
-To create the default permissions (which are defined in the `scripts/permission.seed.ts`) and a user with email and permission:
-```bash
-# In case you dont need a user you can run the command without passing the parameters
-# If you want you can pass multiple permissions like --permission ADMIN,USER
-npx ts-node scripts/init.ts --email admin@example.com --permission ADMIN
-```
-> [!WARNING]
-> If you change the `USER` permission in the `scripts/permission.seed.ts` make sure to change it in the `auth.controller.ts` too.
+| Layer | Technology |
+|-------|-----------|
+| Framework | NestJS 11 |
+| ORM | TypeORM 0.3 |
+| Database | PostgreSQL 17 |
+| Auth | JWT + Passport (local + Google OAuth2) |
+| Hashing | bcrypt (10 rounds) |
+| Validation | class-validator + class-transformer |
+| Docs | Swagger / OpenAPI |
+| Testing | Jest + Supertest |
 
-## Compile and run the project
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
-```
 ---
-# How It Works
+
+## Project Structure
+
+```
+├── database/
+│   ├── migrations/          # TypeORM migrations
+│   └── seeds/               # Database seeders
+├── scripts/
+│   └── test-api.sh          # cURL integration tests
+├── src/
+│   ├── common/
+│   │   ├── decorators/      # @Public(), @Permissions()
+│   │   ├── dto/             # Shared DTOs
+│   │   ├── entities/        # TypeORM entities (User, Permission)
+│   │   ├── filters/         # Global HTTP exception filter
+│   │   └── guards/          # AuthGuard, PermissionsGuard, GoogleOAuthGuard
+│   ├── modules/
+│   │   ├── auth/            # JWT + Google OAuth, AuthService, AuthController
+│   │   │   └── strategies/  # GoogleStrategy
+│   │   ├── permission/      # Permission CRUD
+│   │   └── user/            # User profile endpoint
+│   ├── app.module.ts
+│   └── main.ts
+├── test/                    # e2e test suites
+├── docker-compose.yml       # PostgreSQL via Docker
+├── typeorm.config.ts        # Migration CLI config
+└── .env.sample
+```
+
+---
+
+## Quick Start
+
+### 1. Start PostgreSQL
+
+```bash
+docker-compose up -d
+```
+
+### 2. Install dependencies
+
+```bash
+yarn install
+```
+
+### 3. Configure environment
+
+```bash
+cp .env.sample .env
+# Edit .env — set JWT_SECRET, REFRESH_TOKEN_SECRET, and verify DATABASE_URL
+```
+
+### 4. Run migrations
+
+```bash
+# Generate (after modifying entities):
+yarn migration:generate src/database/migrations/<MigrationName>
+
+# Apply:
+yarn migration:run
+```
+
+In development, `synchronize: true` is active so the schema is auto-synced without migrations.
+
+### 5. Seed the database
+
+```bash
+# Creates default permissions (ADMIN, USER, MODERATOR) + an admin user
+yarn seed --email admin@example.com --password MySecurePass! --permission ADMIN
+
+# Google-only user (no password):
+yarn seed --email admin@example.com --permission ADMIN
+
+# Multiple permissions:
+yarn seed --email admin@example.com --password MyPass! --permission ADMIN,MODERATOR
+```
+
+> **Note:** If you rename the `USER` permission in the seeder, update `auth.controller.ts` accordingly.
+
+### 6. Start the server
+
+```bash
+# Development (watch mode)
+yarn start:dev
+
+# Production
+yarn build && yarn start:prod
+```
+
+Swagger UI is available at `http://localhost:5000/docs`.
+
+---
+
+## Google OAuth2 Setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a project → **APIs & Services → OAuth consent screen** → External.
+3. **APIs & Services → Credentials → Create Credentials → OAuth client ID** (Web application).
+4. Add `http://localhost:5000/api/auth/google/callback` to **Authorized redirect URIs**.
+5. Copy the Client ID and Client Secret to your `.env`:
+
+```env
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_CALLBACK_URL=http://localhost:5000/api/auth/google/callback
+```
+
+---
+
+## API Endpoints
+
+All routes below sit behind the global `/api` prefix (see [Project Structure](#project-structure)) — the only exception is `/health`.
+
+### Auth (`/api/auth`)
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/api/auth/register` | Register with email + password | Public |
+| POST | `/api/auth/login` | Login with email + password | Public |
+| POST | `/api/auth/logout` | Clear auth cookies | Public |
+| POST | `/api/auth/logout-all` | Revoke all sessions (bumps `tokenVersion`) | JWT |
+| GET | `/api/auth/validate` | Validate / refresh tokens | Public |
+| GET | `/api/auth/google` | Initiate Google OAuth | Public |
+| GET | `/api/auth/google/callback` | Google OAuth callback | Public |
+
+### User (`/api/user`)
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| GET | `/api/user/me` | Get current user profile | JWT |
+
+### Permission (`/api/permission`)
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| GET | `/api/permission` | List all permissions | ADMIN |
+| POST | `/api/permission` | Create a permission | ADMIN |
+| PUT | `/api/permission/:id` | Update a permission | ADMIN |
+| DELETE | `/api/permission/:id` | Delete a permission | ADMIN |
+
+### Health
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| GET | `/health` | Health check | Public |
+
+---
+
 ## Decorators
-### 🔑 `@Permissions()`
-The **@Permissions()** decorator is used to restrict access to specific routes based on the user's permissions.
-It supports:
-* AND logic
-* OR logic
-* Combined logic
-* Wildcard matching
 
-> [!IMPORTANT]
-> The permissions are automatically converted to **UPPERCASE** during validation. So even if you write them in lowercase in the decorator, it will still work.
+### `@Public()`
 
-#### ➕ AND Logic
-`@Permissions(['permission1', 'permission2'])`
-> [!NOTE]
-> Requires both **PERMISSION1** and **PERMISSION2**.
+Marks a route or controller as publicly accessible (skips `AuthGuard`).
 
-#### 🔁 OR Logic
-`@Permissions('permission1', 'permission2')`
-> [!NOTE]
-> Requires at least one between **PERMISSION1** and **PERMISSION2**.
-
-#### 🔀 Combined (AND + OR)
-`@Permissions(['permission1', 'permission2'], 'permission3')`
-> [!NOTE]
-> Requires: (**PERMISSION1** AND **PERMISSION2**) OR **PERMISSION3**.
-
-#### 🌟 Wildcard Matching
-`@Permissions('permission_*')`
-> [!NOTE]
-> Matches any permission starting with **PERMISSION_**. For example: **PERMISSION_VIEW**, **PERMISSION_EDIT**, **PERMISSION_ADMIN**, etc.
-
-### `🌐 Public()`
-There may be cases where you want certain routes or controllers to be publicly accessible (without requiring authentication).\ 
-In such cases, you can use the **@Public()** decorator to skip the AuthGuard for specific endpoints or controllers.
-Example:
-```javascript
+```typescript
 @Controller('auth')
 @Public()
-export class AuthController { } 
+export class AuthController {}
 ```
----
-## 🛡️ Guards
-### 🔒 AuthGuard
-> Handles user authentication using JWT tokens.
 
-#### What it does:
-* Protects routes by default (unless explicitly marked as public).
-* Checks for a valid access_token in:
-  * Authorization header (Bearer ...)
-  * or cookies (access_token)
-* If the access_token is missing or expired, and a refresh_token is available:
-  * ✅ It will automatically use the refresh_token to generate new tokens and save them in cookies.
-  * ❌ If both tokens are invalid or missing, the request is rejected with **401 Unauthorized**.
+### `@Permissions(...)`
 
-#### Public routes:
-As stated before you can make a route public by using the **@Public()** decorator.
-### 🔐 PermissionsGuard
-> Handles authorization: checks if the authenticated user has the required permissions to access a route.
+Restricts access based on user permissions. Supports AND/OR/wildcard logic.
 
-#### What it does:
-* Reads the required permissions defined on a route using a **@Permissions()** decorator.
-* Gets the authenticated user's permissions from the database.
-* Compares the user’s permissions with the required ones:
-  * ✅ If the user has all required permissions, access is allowed.
-  * ❌ If not, access is denied with a 403 Forbidden.
+```typescript
+// OR — requires EDIT or DELETE
+@Permissions('EDIT', 'DELETE')
 
-#### Advanced features:
-✅ Supports wildcard matching (e.g. USER.*)\
-🔠 Case-insensitive
+// AND — requires both READ and WRITE
+@Permissions(['READ', 'WRITE'])
+
+// Combined — (READ AND WRITE) OR ADMIN
+@Permissions(['READ', 'WRITE'], 'ADMIN')
+
+// Wildcard — any permission matching MANAGE_*
+@Permissions('MANAGE_*')
+```
+
+> Permissions are case-insensitive. Users with `ADMIN` bypass all permission checks.
 
 ---
+
+## Guards
+
+### `AuthGuard` (global)
+
+- Checks `Authorization: Bearer <token>` header or `access_token` cookie.
+- On `TokenExpiredError`, automatically refreshes via `refresh_token` cookie.
+- Returns `401 Unauthorized` if both tokens are absent or invalid.
+
+### `PermissionsGuard` (global)
+
+- Reads required permissions from the `@Permissions()` decorator.
+- Queries the user's permissions from the database.
+- Returns `403 Forbidden` if the user lacks the required permissions.
+- `ADMIN` permission bypasses all checks.
+
+### `ThrottlerGuard` (global)
+
+Rate limiting: 100 requests per 60 seconds per IP.
+
+---
+
+## Token Strategy
+
+| Token | Storage | Expiry (default) | httpOnly |
+|-------|---------|-----------------|---------|
+| Access token | `access_token` cookie | 15 minutes | Yes |
+| Refresh token | `refresh_token` cookie | 7 days | Yes |
+
+Tokens are automatically rotated on each refresh. Cookies get the `secure` flag automatically when `NODE_ENV=production`.
+
+---
+
+## Running Tests
+
+```bash
+# Unit tests
+yarn test
+
+# Unit tests with coverage
+yarn test:cov
+
+# e2e tests (no real database needed — mocked)
+yarn test:e2e
+```
+
+### Manual cURL Tests
+
+```bash
+# Start the server first, then:
+./scripts/test-api.sh
+
+# Custom host:
+./scripts/test-api.sh http://localhost:5000
+```
+
+---
+
+## Migrations
+
+```bash
+# Generate a new migration after changing entities
+yarn migration:generate src/database/migrations/CreateUsersTable
+
+# Apply pending migrations
+yarn migration:run
+
+# Revert the last migration
+yarn migration:revert
+
+# Show migration status
+yarn migration:show
+```
+
+---
+
+## Reverse Proxy
+
+The app is meant to run behind a reverse proxy (nginx, Caddy, Traefik...) that terminates TLS. It already trusts the first proxy hop (`app.set('trust proxy', 1)` in `main.ts`), so `req.ip` and the `ThrottlerGuard`'s per-IP rate limiting still work correctly instead of bucketing every client under the proxy's IP.
+
+<details>
+<summary>Example nginx / Caddy config</summary>
+
+**nginx**
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name api.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/api.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cookie_path / /;
+    }
+}
+```
+
+**Caddy**
+
+```caddyfile
+api.example.com {
+    reverse_proxy 127.0.0.1:5000
+}
+```
+
+Set `NODE_ENV=production` so the auth cookies get the `secure` flag, and set `CORS_ORIGIN` to the exact origin(s) serving the frontend — `credentials: true` cookies don't work with a wildcard origin.
+
+</details>
+
+---
+
 ## Contributing
 
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Commit your changes: `git commit -m 'feat: add my feature'`
+4. Push: `git push origin feature/my-feature`
+5. Open a pull request.
 
-If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
-Don't forget to give the project a star! Thanks again!
+---
 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
----   
 ## Contact
-For any issues or questions, feel free to get in touch.\
-Deyvid Manolov - [Telegram](https://t.me/FileExists) - [My Website](https://www.deyvid.dev)
+
+Deyvid Manolov — [Telegram](https://t.me/FileExists) — [deyvid.dev](https://www.deyvid.dev)

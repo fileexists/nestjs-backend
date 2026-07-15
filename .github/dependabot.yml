@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Major bumps kept manual — flat-config/CLI breakage risk, see .secrets/IMP.md
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nestjs/cli"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@swc/cli"
+        update-types: ["version-update:semver-major"]
