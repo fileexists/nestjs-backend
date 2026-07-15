@@ -289,12 +289,15 @@ yarn migration:show
 
 The app is meant to run behind a reverse proxy (nginx, Caddy, Traefik...) that terminates TLS. It already trusts the first proxy hop (`app.set('trust proxy', 1)` in `main.ts`), so `req.ip` and the `ThrottlerGuard`'s per-IP rate limiting still work correctly instead of bucketing every client under the proxy's IP.
 
+Both examples below forward the request path unchanged (no rewriting) — since the app already expects everything under `/api` (see [API Endpoints](#api-endpoints)), that's the config with the least room for surprises. This means on the dedicated subdomain the path still includes `/api`, e.g. `api.example.com/api/auth/login`, not `api.example.com/auth/login`. You can run either setup alone or both at once against the same backend.
+
 <details>
 <summary>Example nginx / Caddy config</summary>
 
 **nginx**
 
 ```nginx
+# Option 1: dedicated subdomain — api.example.com/api/auth/login
 server {
     listen 443 ssl http2;
     server_name api.example.com;
@@ -303,7 +306,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:5000;
+        proxy_pass http://127.0.0.1:5000; # no trailing path → forwards the URI as-is
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -312,15 +315,57 @@ server {
         proxy_cookie_path / /;
     }
 }
+
+# Option 2: same domain as the frontend, under /api — example.com/api/auth/login
+server {
+    listen 443 ssl http2;
+    server_name example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:5000; # same rule: no trailing path, /api/... passes through as-is
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cookie_path / /;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:5000/health;
+        proxy_set_header Host $host;
+    }
+
+    # ... rest of the site (frontend, etc.)
+}
 ```
 
 **Caddy**
 
 ```caddyfile
+# Option 1: dedicated subdomain — api.example.com/api/auth/login
 api.example.com {
     reverse_proxy 127.0.0.1:5000
 }
+
+# Option 2: same domain as the frontend, under /api — example.com/api/auth/login
+example.com {
+    handle /api/* {
+        reverse_proxy 127.0.0.1:5000
+    }
+
+    handle /health {
+        reverse_proxy 127.0.0.1:5000
+    }
+
+    # ... rest of the site (frontend, etc.)
+}
 ```
+
+`/health` and `/docs` sit outside the `/api` prefix (see [API Endpoints](#api-endpoints)), so on the path-based setup they need their own `location`/`handle` block to be reachable from the main domain — otherwise they're only reachable through the dedicated subdomain.
 
 Set `NODE_ENV=production` so the auth cookies get the `secure` flag, and set `CORS_ORIGIN` to the exact origin(s) serving the frontend — `credentials: true` cookies don't work with a wildcard origin.
 
