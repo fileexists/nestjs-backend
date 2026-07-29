@@ -47,7 +47,7 @@
     "pg": "^8.22.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.30"
+    "typeorm": "^1.1.0"
   },
   "resolutions": {
     "@babel/core": "^7.29.6",
