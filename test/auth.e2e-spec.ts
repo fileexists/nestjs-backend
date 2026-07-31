@@ -16,8 +16,8 @@ import {
   ExecutionContext,
   CanActivate,
 } from '@nestjs/common';
-import * as request from 'supertest';
-import * as cookieParser from 'cookie-parser';
+import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import * as bcrypt from 'bcrypt';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -183,11 +183,11 @@ async function createGoogleOverrideApp(
     .overrideProvider('THROTTLER:MODULE_OPTIONS')
     .useValue([{ ttl: 60000, limit: 99999 }])
     .overrideProvider(AuthGuard)
-    .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+    .useValue({ canActivate: () => Promise.resolve(true) })
     .overrideProvider(PermissionsGuard)
-    .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+    .useValue({ canActivate: () => Promise.resolve(true) })
     .overrideProvider(ThrottlerGuard)
-    .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+    .useValue({ canActivate: () => Promise.resolve(true) })
     .overrideGuard(GoogleOAuthGuard)
     .useValue(googleGuardStub)
     .compile();
@@ -219,11 +219,11 @@ describe('AuthController (e2e)', () => {
       .overrideProvider('THROTTLER:MODULE_OPTIONS')
       .useValue([{ ttl: 60000, limit: 99999 }])
       .overrideProvider(AuthGuard)
-      .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+      .useValue({ canActivate: () => Promise.resolve(true) })
       .overrideProvider(PermissionsGuard)
-      .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+      .useValue({ canActivate: () => Promise.resolve(true) })
       .overrideProvider(ThrottlerGuard)
-      .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+      .useValue({ canActivate: () => Promise.resolve(true) })
       .compile();
 
     app = moduleFixture.createNestApplication();

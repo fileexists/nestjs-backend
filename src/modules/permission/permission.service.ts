@@ -19,7 +19,7 @@ export class PermissionService {
   ): Promise<Permission | null> {
     return this.permissionRepository.findOne({
       where: filter,
-      relations: ['users'],
+      relations: { users: true },
     });
   }
 

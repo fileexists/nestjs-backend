@@ -55,7 +55,7 @@ describe('PermissionService', () => {
 
       expect(mockPermissionRepository.findOne).toHaveBeenCalledWith({
         where: { name: 'USER' },
-        relations: ['users'],
+        relations: { users: true },
       });
       expect(result).toEqual(permission);
     });
@@ -76,7 +76,7 @@ describe('PermissionService', () => {
 
       expect(mockPermissionRepository.findOne).toHaveBeenCalledWith({
         where: { id: 'specific-uuid' },
-        relations: ['users'],
+        relations: { users: true },
       });
       expect(result).toEqual(permission);
     });

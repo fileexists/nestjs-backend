@@ -62,7 +62,7 @@ export class PermissionController {
       return { message: `Permission '${permission.name}' created`, permission };
     } catch (error) {
       // PostgreSQL unique-constraint violation code
-      if (error.code === '23505') {
+      if ((error as { code?: string }).code === '23505') {
         throw new ConflictException(`Permission '${dto.name}' already exists`);
       }
       throw new InternalServerErrorException('Error creating permission');

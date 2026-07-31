@@ -23,8 +23,8 @@ import {
   ExecutionContext,
   CanActivate,
 } from '@nestjs/common';
-import * as request from 'supertest';
-import * as cookieParser from 'cookie-parser';
+import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
@@ -157,9 +157,9 @@ describe('User & Permission Controllers (e2e)', () => {
       .overrideProvider(getRepositoryToken(Permission))
       .useValue(mockPermissionRepository)
       .overrideProvider(ThrottlerGuard)
-      .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+      .useValue({ canActivate: () => Promise.resolve(true) })
       .overrideProvider(PermissionsGuard)
-      .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+      .useValue({ canActivate: () => Promise.resolve(true) })
       .compile();
 
     jwtService = moduleFixture.get<JwtService>(JwtService);

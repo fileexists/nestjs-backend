@@ -99,7 +99,7 @@ describe('UserService', () => {
 
       expect(mockUserRepository.findOne).toHaveBeenCalledWith({
         where: { email: user.email },
-        relations: ['permissions'],
+        relations: { permissions: true },
       });
       expect(result).toEqual(user);
     });
@@ -122,7 +122,7 @@ describe('UserService', () => {
 
       expect(mockUserRepository.findOne).toHaveBeenCalledWith({
         where: { id: user.id },
-        relations: ['permissions'],
+        relations: { permissions: true },
       });
       expect(result).toEqual(user);
     });

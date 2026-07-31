@@ -26,28 +26,28 @@ export class UserService {
   async getUserByEmail(email: string): Promise<User | null> {
     return this.userRepository.findOne({
       where: { email },
-      relations: ['permissions'],
+      relations: { permissions: true },
     });
   }
 
   async getUserById(id: string): Promise<User | null> {
     return this.userRepository.findOne({
       where: { id },
-      relations: ['permissions'],
+      relations: { permissions: true },
     });
   }
 
   async getUserPermissions(id: string): Promise<Permission[] | null> {
     const user = await this.userRepository.findOne({
       where: { id },
-      relations: ['permissions'],
+      relations: { permissions: true },
     });
     return user ? user.permissions : null;
   }
 
   async getAllUsers(page = 1, limit = 20): Promise<PaginatedUsers> {
     const [data, total] = await this.userRepository.findAndCount({
-      relations: ['permissions'],
+      relations: { permissions: true },
       skip: (page - 1) * limit,
       take: limit,
       order: { createdAt: 'DESC' },
