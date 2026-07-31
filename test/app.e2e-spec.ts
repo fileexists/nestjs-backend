@@ -8,7 +8,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, CanActivate } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
 import { DataSource } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -50,11 +50,11 @@ describe('AppModule bootstrap (e2e)', () => {
         update: jest.fn(),
       })
       .overrideProvider(AuthGuard)
-      .useValue({ canActivate: () => true } as CanActivate)
+      .useValue({ canActivate: () => true })
       .overrideProvider(PermissionsGuard)
-      .useValue({ canActivate: () => true } as CanActivate)
+      .useValue({ canActivate: () => true })
       .overrideProvider(ThrottlerGuard)
-      .useValue({ canActivate: () => true } as CanActivate)
+      .useValue({ canActivate: () => true })
       .compile();
 
     app = moduleFixture.createNestApplication();

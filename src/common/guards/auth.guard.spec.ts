@@ -13,12 +13,7 @@ function buildContext(options: {
   accessTokenCookie?: string;
   refreshTokenCookie?: string;
 }): ExecutionContext {
-  const {
-    isPublic = false,
-    authHeader,
-    accessTokenCookie,
-    refreshTokenCookie,
-  } = options;
+  const { authHeader, accessTokenCookie, refreshTokenCookie } = options;
 
   const mockRequest: Record<string, unknown> = {
     headers: { authorization: authHeader },

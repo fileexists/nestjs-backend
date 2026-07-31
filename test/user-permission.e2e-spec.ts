@@ -21,7 +21,6 @@ import {
   INestApplication,
   ValidationPipe,
   ExecutionContext,
-  CanActivate,
 } from '@nestjs/common';
 import * as request from 'supertest';
 import * as cookieParser from 'cookie-parser';
@@ -157,9 +156,9 @@ describe('User & Permission Controllers (e2e)', () => {
       .overrideProvider(getRepositoryToken(Permission))
       .useValue(mockPermissionRepository)
       .overrideProvider(ThrottlerGuard)
-      .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+      .useValue({ canActivate: () => Promise.resolve(true) })
       .overrideProvider(PermissionsGuard)
-      .useValue({ canActivate: () => Promise.resolve(true) } as CanActivate)
+      .useValue({ canActivate: () => Promise.resolve(true) })
       .compile();
 
     jwtService = moduleFixture.get<JwtService>(JwtService);
@@ -167,7 +166,7 @@ describe('User & Permission Controllers (e2e)', () => {
     const authGuardRef = moduleFixture.get<AuthGuard>(AuthGuard);
     jest
       .spyOn(authGuardRef, 'canActivate')
-      .mockImplementation(async (ctx: ExecutionContext) => {
+      .mockImplementation((ctx: ExecutionContext) => {
         const req = ctx.switchToHttp().getRequest();
         const token: string | undefined = req.cookies?.access_token;
         if (token) {
@@ -177,7 +176,7 @@ describe('User & Permission Controllers (e2e)', () => {
             // leave req.user undefined
           }
         }
-        return true;
+        return Promise.resolve(true);
       });
 
     app = moduleFixture.createNestApplication();

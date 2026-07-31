@@ -344,9 +344,7 @@ describe('AuthService', () => {
       await expect(
         service.refreshTokens('valid.refresh.token'),
       ).rejects.toThrow(UnauthorizedException);
-      await expect(mockUserService.getUserById).toHaveBeenCalledWith(
-        'deleted-uuid',
-      );
+      expect(mockUserService.getUserById).toHaveBeenCalledWith('deleted-uuid');
     });
 
     it('should throw UnauthorizedException when tokenVersion does not match (revoked session, e.g. after logout-all)', async () => {
