@@ -339,6 +339,11 @@ server {
         proxy_set_header Host $host;
     }
 
+    location /docs {
+        proxy_pass http://127.0.0.1:5000/docs;
+        proxy_set_header Host $host;
+    }
+
     # ... rest of the site (frontend, etc.)
 }
 ```
@@ -358,6 +363,10 @@ example.com {
     }
 
     handle /health {
+        reverse_proxy 127.0.0.1:5000
+    }
+
+    handle /docs {
         reverse_proxy 127.0.0.1:5000
     }
 
