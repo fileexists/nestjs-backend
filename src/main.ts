@@ -81,4 +81,4 @@ async function bootstrap(): Promise<void> {
   logger.log(`Swagger docs available at http://localhost:${port}/docs`);
 }
 
-bootstrap();
+void bootstrap();

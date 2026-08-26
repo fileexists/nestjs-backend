@@ -8,8 +8,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, CanActivate } from '@nestjs/common';
-import request from 'supertest';
+import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AppModule } from './../src/app.module';
@@ -18,6 +17,7 @@ import { Permission } from './../src/common/entities/permission.entity';
 import { AuthGuard } from './../src/common/guards/auth.guard';
 import { PermissionsGuard } from './../src/common/guards/permissions.guard';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { req } from './utils/http';
 
 describe('AppModule bootstrap (e2e)', () => {
   let app: INestApplication;
@@ -67,10 +67,10 @@ describe('AppModule bootstrap (e2e)', () => {
   });
 
   it('should start and respond to /health with 200', async () => {
-    await request(app.getHttpServer()).get('/health').expect(200);
+    await req(app).get('/health').expect(200);
   });
 
   it('should respond to unknown routes with 404 (not 500)', async () => {
-    await request(app.getHttpServer()).get('/non-existent-route').expect(404);
+    await req(app).get('/non-existent-route').expect(404);
   });
 });

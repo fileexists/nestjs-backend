@@ -21,9 +21,8 @@ import {
   INestApplication,
   ValidationPipe,
   ExecutionContext,
-  CanActivate,
 } from '@nestjs/common';
-import request from 'supertest';
+import type { Request } from 'express';
 import cookieParser from 'cookie-parser';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -35,6 +34,8 @@ import { Permission } from '../src/common/entities/permission.entity';
 import { AuthGuard } from '../src/common/guards/auth.guard';
 import { PermissionsGuard } from '../src/common/guards/permissions.guard';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { TokenPayload } from '../src/common/interfaces/jwt-payload.interface';
+import { req, ApiResponseBody } from './utils/http';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -167,17 +168,17 @@ describe('User & Permission Controllers (e2e)', () => {
     const authGuardRef = moduleFixture.get<AuthGuard>(AuthGuard);
     jest
       .spyOn(authGuardRef, 'canActivate')
-      .mockImplementation(async (ctx: ExecutionContext) => {
-        const req = ctx.switchToHttp().getRequest();
-        const token: string | undefined = req.cookies?.access_token;
+      .mockImplementation((ctx: ExecutionContext) => {
+        const httpRequest = ctx.switchToHttp().getRequest<Request>();
+        const token = httpRequest.cookies?.access_token as string | undefined;
         if (token) {
           try {
-            req.user = jwtService.decode(token);
+            httpRequest.user = jwtService.decode<TokenPayload>(token);
           } catch {
             // leave req.user undefined
           }
         }
-        return true;
+        return Promise.resolve(true);
       });
 
     app = moduleFixture.createNestApplication();
@@ -274,33 +275,36 @@ describe('User & Permission Controllers (e2e)', () => {
     it('should return the authenticated user payload when a valid access token is present', async () => {
       const token = buildAccessToken(jwtService, REGULAR_USER);
 
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .get('/api/user/me')
         .set('Cookie', [`access_token=${token}`])
         .expect(200);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.id).toBe(REGULAR_USER.id);
-      expect(response.body.email).toBe(REGULAR_USER.email);
+      expect(body.id).toBe(REGULAR_USER.id);
+      expect(body.email).toBe(REGULAR_USER.email);
     });
 
     it('should return 401 when no access token is provided', async () => {
-      const response = await request(app.getHttpServer())
-        .get('/api/user/me')
-        .expect(401);
+      const response = await req(app).get('/api/user/me').expect(401);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('User is not authenticated.');
+      expect(body.message).toBe('User is not authenticated.');
     });
 
     it('should return the permissions array inside the user payload', async () => {
       const token = buildAccessToken(jwtService, ADMIN_USER);
 
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .get('/api/user/me')
         .set('Cookie', [`access_token=${token}`])
         .expect(200);
+      const body = response.body as ApiResponseBody & {
+        permissions?: { name: string }[];
+      };
 
-      expect(Array.isArray(response.body.permissions)).toBe(true);
-      expect(response.body.permissions[0].name).toBe('ADMIN');
+      expect(Array.isArray(body.permissions)).toBe(true);
+      expect(body.permissions?.[0].name).toBe('ADMIN');
     });
   });
 
@@ -311,23 +315,25 @@ describe('User & Permission Controllers (e2e)', () => {
   describe('GET /permission', () => {
     it('should return all permissions from the repository', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .get('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .expect(200);
+      const body = response.body as Permission[];
 
-      expect(Array.isArray(response.body)).toBe(true);
-      expect(response.body).toHaveLength(permDb.size);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body).toHaveLength(permDb.size);
     });
 
     it('should include both USER and ADMIN permissions in the response', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .get('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .expect(200);
+      const body = response.body as Permission[];
 
-      const names: string[] = response.body.map((p: Permission) => p.name);
+      const names: string[] = body.map((p) => p.name);
       expect(names).toContain('USER');
       expect(names).toContain('ADMIN');
     });
@@ -337,7 +343,7 @@ describe('User & Permission Controllers (e2e)', () => {
       mockPermissionRepository.find.mockResolvedValue([]);
 
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .get('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .expect(200);
@@ -353,27 +359,30 @@ describe('User & Permission Controllers (e2e)', () => {
   describe('POST /permission', () => {
     it('should create a new permission with the name uppercased and return 201', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ name: 'moderator', description: 'Can moderate content' })
         .expect(201);
+      const body = response.body as ApiResponseBody;
+      const permission = body.permission as Permission | undefined;
 
-      expect(response.body.message).toMatch(/Permission 'MODERATOR' created/);
-      expect(response.body.permission).toBeDefined();
-      expect(response.body.permission.name).toBe('MODERATOR');
+      expect(body.message).toMatch(/Permission 'MODERATOR' created/);
+      expect(permission).toBeDefined();
+      expect(permission?.name).toBe('MODERATOR');
     });
 
     it('should uppercase the permission name before persisting it', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      await request(app.getHttpServer())
+      await req(app)
         .post('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ name: 'viewer', description: 'Viewer permission' })
         .expect(201);
 
-      const saveCallArg = mockPermissionRepository.save.mock
-        .calls[0][0] as Permission;
+      const saveCalls = mockPermissionRepository.save.mock
+        .calls as Permission[][];
+      const saveCallArg = saveCalls[0][0];
       expect(saveCallArg.name).toBe('VIEWER');
     });
 
@@ -387,13 +396,14 @@ describe('User & Permission Controllers (e2e)', () => {
       mockPermissionRepository.save.mockRejectedValueOnce(dbError);
 
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ name: 'USER', description: 'User role' })
         .expect(409);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toMatch(/already exists/);
+      expect(body.message).toMatch(/already exists/);
     });
 
     it('should return 500 when an unexpected error occurs during creation', async () => {
@@ -402,13 +412,14 @@ describe('User & Permission Controllers (e2e)', () => {
       );
 
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/permission')
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ name: 'BROKEN', description: 'Broken perm' })
         .expect(500);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('Error creating permission');
+      expect(body.message).toBe('Error creating permission');
     });
   });
 
@@ -419,30 +430,32 @@ describe('User & Permission Controllers (e2e)', () => {
   describe('PUT /permission/:id', () => {
     it('should update an existing permission and return 200 with the updated entity', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .put(`/api/permission/${USER_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ description: 'Updated description' })
         .expect(200);
+      const body = response.body as Permission;
 
-      expect(response.body.id).toBe(USER_PERMISSION.id);
-      expect(response.body.description).toBe('Updated description');
+      expect(body.id).toBe(USER_PERMISSION.id);
+      expect(body.description).toBe('Updated description');
     });
 
     it('should return 404 when the permission id does not exist', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .put(`/api/permission/${NON_EXISTENT_UUID}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ description: 'Anything' })
         .expect(404);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toMatch(/not found/i);
+      expect(body.message).toMatch(/not found/i);
     });
 
     it('should return 400 when sent a non-string name (class-validator on UpdatePermissionDTO)', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      await request(app.getHttpServer())
+      await req(app)
         .put(`/api/permission/${USER_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ name: 1234 })
@@ -451,13 +464,14 @@ describe('User & Permission Controllers (e2e)', () => {
 
     it('should accept a partial body (all UpdatePermissionDTO fields are optional)', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .put(`/api/permission/${ADMIN_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .send({ description: 'Elevated access' })
         .expect(200);
+      const body = response.body as Permission;
 
-      expect(response.body.description).toBe('Elevated access');
+      expect(body.description).toBe('Elevated access');
     });
   });
 
@@ -468,17 +482,18 @@ describe('User & Permission Controllers (e2e)', () => {
   describe('DELETE /permission/:id', () => {
     it('should delete a permission and return 200 with a confirmation message', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .delete(`/api/permission/${USER_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .expect(200);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('Permission deleted');
+      expect(body.message).toBe('Permission deleted');
     });
 
     it('should call repository.delete with the correct id', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      await request(app.getHttpServer())
+      await req(app)
         .delete(`/api/permission/${ADMIN_PERMISSION.id}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .expect(200);
@@ -490,12 +505,13 @@ describe('User & Permission Controllers (e2e)', () => {
 
     it('should return 404 when the permission id does not exist', async () => {
       const adminToken = buildAccessToken(jwtService, ADMIN_USER);
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .delete(`/api/permission/${NON_EXISTENT_UUID}`)
         .set('Cookie', [`access_token=${adminToken}`])
         .expect(404);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toMatch(/not found/i);
+      expect(body.message).toMatch(/not found/i);
     });
   });
 });

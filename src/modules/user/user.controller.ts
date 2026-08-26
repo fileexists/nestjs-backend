@@ -24,7 +24,7 @@ export class UserController {
   @ApiUnauthorizedResponse({ description: 'Authentication failed' })
   @Get('me')
   async getCurrentUser(@Req() req: Request): Promise<UserResponseDto> {
-    const userId = (req.user as { id?: string } | undefined)?.id;
+    const userId = req.user?.id;
     if (!userId) {
       throw new UnauthorizedException('User is not authenticated.');
     }

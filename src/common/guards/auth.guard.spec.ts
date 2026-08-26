@@ -8,17 +8,11 @@ import { AuthService } from '../../modules/auth/auth.service';
 import { CookieOptions } from 'express';
 
 function buildContext(options: {
-  isPublic?: boolean;
   authHeader?: string;
   accessTokenCookie?: string;
   refreshTokenCookie?: string;
 }): ExecutionContext {
-  const {
-    isPublic = false,
-    authHeader,
-    accessTokenCookie,
-    refreshTokenCookie,
-  } = options;
+  const { authHeader, accessTokenCookie, refreshTokenCookie } = options;
 
   const mockRequest: Record<string, unknown> = {
     headers: { authorization: authHeader },
@@ -112,7 +106,7 @@ describe('AuthGuard', () => {
   describe('when the route is decorated with @Public()', () => {
     it('should allow access without any token', async () => {
       mockReflector.getAllAndOverride.mockReturnValue(true);
-      const ctx = buildContext({ isPublic: true });
+      const ctx = buildContext({});
 
       const result = await guard.canActivate(ctx);
 

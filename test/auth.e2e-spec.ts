@@ -16,7 +16,7 @@ import {
   ExecutionContext,
   CanActivate,
 } from '@nestjs/common';
-import request from 'supertest';
+import type { Request } from 'express';
 import cookieParser from 'cookie-parser';
 import * as bcrypt from 'bcrypt';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -31,6 +31,7 @@ import { AuthService } from '../src/modules/auth/auth.service';
 import { AuthGuard } from '../src/common/guards/auth.guard';
 import { PermissionsGuard } from '../src/common/guards/permissions.guard';
 import { GoogleOAuthGuard } from '../src/common/guards/google-oauth.guard';
+import { req, ApiResponseBody } from './utils/http';
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
@@ -165,8 +166,8 @@ async function createGoogleOverrideApp(
 ): Promise<INestApplication> {
   const googleGuardStub: CanActivate = {
     canActivate: (context: ExecutionContext) => {
-      const req = context.switchToHttp().getRequest();
-      req.user = userPayload;
+      const httpRequest = context.switchToHttp().getRequest<Request>();
+      httpRequest.user = userPayload as Express.User;
       return true;
     },
   };
@@ -301,13 +302,10 @@ describe('AuthController (e2e)', () => {
 
   describe('POST /api/auth/logout', () => {
     it('should return 200 and clear both cookies', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/api/auth/logout')
-        .expect(200);
+      const response = await req(app).post('/api/auth/logout').expect(200);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe(
-        'User has been logged out successfully.',
-      );
+      expect(body.message).toBe('User has been logged out successfully.');
 
       const setCookieHeaders: string[] =
         (response.headers['set-cookie'] as unknown as string[]) ?? [];
@@ -323,18 +321,19 @@ describe('AuthController (e2e)', () => {
 
   describe('POST /auth/register', () => {
     it('should return 201 and the new userId when registering a brand-new email', async () => {
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/auth/register')
         .send({ email: 'newuser@example.com', password: 'StrongPass1!' })
         .expect(201);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('User registered successfully');
-      expect(response.body.userId).toBeDefined();
-      expect(typeof response.body.userId).toBe('string');
+      expect(body.message).toBe('User registered successfully');
+      expect(body.userId).toBeDefined();
+      expect(typeof body.userId).toBe('string');
     });
 
     it('should store a bcrypt-hashed password (not plain text) in the repository', async () => {
-      await request(app.getHttpServer())
+      await req(app)
         .post('/api/auth/register')
         .send({ email: 'hashed@example.com', password: 'PlainText123' })
         .expect(201);
@@ -345,7 +344,7 @@ describe('AuthController (e2e)', () => {
     });
 
     it('should assign the USER permission to the newly created account', async () => {
-      await request(app.getHttpServer())
+      await req(app)
         .post('/api/auth/register')
         .send({ email: 'withperm@example.com', password: 'Pass1234!' })
         .expect(201);
@@ -355,12 +354,13 @@ describe('AuthController (e2e)', () => {
     });
 
     it('should return 400 when the email is already registered', async () => {
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/auth/register')
         .send({ email: LOCAL_USER.email, password: 'AnyPassword1' })
         .expect(400);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('User already registered');
+      expect(body.message).toBe('User already registered');
     });
   });
 
@@ -374,12 +374,13 @@ describe('AuthController (e2e)', () => {
       const hash = await bcrypt.hash(plainPassword, 10);
       db.set(LOCAL_USER.email, { ...LOCAL_USER, password: hash });
 
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/auth/login')
         .send({ email: LOCAL_USER.email, password: plainPassword })
         .expect(200);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('Login successful.');
+      expect(body.message).toBe('Login successful.');
 
       const cookies: string[] =
         (response.headers['set-cookie'] as unknown as string[]) ?? [];
@@ -389,30 +390,33 @@ describe('AuthController (e2e)', () => {
     });
 
     it('should return 401 when the email does not exist', async () => {
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/auth/login')
         .send({ email: 'nobody@example.com', password: 'anything' })
         .expect(401);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('Invalid email or password');
+      expect(body.message).toBe('Invalid email or password');
     });
 
     it('should return 401 when the password is incorrect', async () => {
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/auth/login')
         .send({ email: LOCAL_USER.email, password: 'WrongPassword!' })
         .expect(401);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('Invalid email or password');
+      expect(body.message).toBe('Invalid email or password');
     });
 
     it('should return 401 when a Google-only user tries to login with a password', async () => {
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/auth/login')
         .send({ email: GOOGLE_USER.email, password: 'anypassword' })
         .expect(401);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('Please login via google.');
+      expect(body.message).toBe('Please login via google.');
     });
 
     it('should update provider to "combined" when a google user logs in with a password', async () => {
@@ -425,7 +429,7 @@ describe('AuthController (e2e)', () => {
       };
       db.set(combinedUser.email, combinedUser);
 
-      await request(app.getHttpServer())
+      await req(app)
         .post('/api/auth/login')
         .send({ email: combinedUser.email, password })
         .expect(200);
@@ -435,12 +439,13 @@ describe('AuthController (e2e)', () => {
     });
 
     it('should return 401 when the request body is missing the password field', async () => {
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .post('/api/auth/login')
         .send({ email: LOCAL_USER.email })
         .expect(401);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe('Invalid email or password');
+      expect(body.message).toBe('Invalid email or password');
     });
   });
 
@@ -456,27 +461,29 @@ describe('AuthController (e2e)', () => {
         permissions: LOCAL_USER.permissions,
       });
 
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .get('/api/auth/validate')
         .set('Cookie', [`access_token=${token}`])
         .expect(200);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.success).toBe(true);
+      expect(body.success).toBe(true);
     });
 
     it('should return 401 when no tokens are present at all', async () => {
-      await request(app.getHttpServer()).get('/api/auth/validate').expect(401);
+      await req(app).get('/api/auth/validate').expect(401);
     });
 
     it('should refresh tokens and return { success: true } when only a valid refresh_token cookie is present', async () => {
       const refreshToken = await buildValidRefreshToken(app, LOCAL_USER);
 
-      const response = await request(app.getHttpServer())
+      const response = await req(app)
         .get('/api/auth/validate')
         .set('Cookie', [`refresh_token=${refreshToken}`])
         .expect(200);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.success).toBe(true);
+      expect(body.success).toBe(true);
 
       const setCookieHeaders: string[] =
         (response.headers['set-cookie'] as unknown as string[]) ?? [];
@@ -486,7 +493,7 @@ describe('AuthController (e2e)', () => {
     });
 
     it('should return 401 when both the access_token and refresh_token are expired/invalid', async () => {
-      await request(app.getHttpServer())
+      await req(app)
         .get('/api/auth/validate')
         .set('Cookie', [
           'access_token=invalid.token; refresh_token=invalid.refresh',
@@ -495,7 +502,7 @@ describe('AuthController (e2e)', () => {
     });
 
     it('should return 401 when only a malformed access_token is present and no refresh_token exists', async () => {
-      await request(app.getHttpServer())
+      await req(app)
         .get('/api/auth/validate')
         .set('Cookie', ['access_token=this.is.garbage'])
         .expect(401);
@@ -508,9 +515,7 @@ describe('AuthController (e2e)', () => {
 
   describe('GET /auth/google', () => {
     it('should redirect to the Google OAuth consent page (302)', async () => {
-      const response = await request(app.getHttpServer())
-        .get('/api/auth/google')
-        .redirects(0);
+      const response = await req(app).get('/api/auth/google').redirects(0);
 
       expect([301, 302, 303, 307, 308]).toContain(response.status);
     });
@@ -528,13 +533,12 @@ describe('AuthController (e2e)', () => {
         name: 'Brand New',
       });
 
-      const response = await request(overriddenApp.getHttpServer())
+      const response = await req(overriddenApp)
         .get('/api/auth/google/callback')
         .expect(200);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe(
-        'Authentication with google was successful.',
-      );
+      expect(body.message).toBe('Authentication with google was successful.');
 
       const cookies: string[] =
         (response.headers['set-cookie'] as unknown as string[]) ?? [];
@@ -556,13 +560,12 @@ describe('AuthController (e2e)', () => {
         name: 'Local User',
       });
 
-      const response = await request(overriddenApp.getHttpServer())
+      const response = await req(overriddenApp)
         .get('/api/auth/google/callback')
         .expect(200);
+      const body = response.body as ApiResponseBody;
 
-      expect(response.body.message).toBe(
-        'Authentication with google was successful.',
-      );
+      expect(body.message).toBe('Authentication with google was successful.');
 
       await overriddenApp.close();
     });

@@ -12,14 +12,7 @@ import type { StringValue } from 'ms';
 import { UserService } from '../user/user.service';
 import { PermissionService } from '../permission/permission.service';
 import { UserAuthDTO } from '../../common/dto/register-user.dto';
-
-interface TokenPayload {
-  id?: string;
-  email?: string;
-  tokenVersion?: number;
-  iat?: number;
-  exp?: number;
-}
+import { TokenPayload } from '../../common/interfaces/jwt-payload.interface';
 
 function parseDurationMs(duration: string): number {
   const match = /^(\d+)(ms|s|m|h|d|w)$/.exec(duration);
@@ -99,10 +92,10 @@ export class AuthService {
     );
   }
 
-  async verifyJwtToken(token: string | undefined): Promise<unknown> {
+  async verifyJwtToken(token: string | undefined): Promise<TokenPayload> {
     try {
       if (!token) throw new Error('No token provided');
-      return await this.jwtService.verifyAsync(token, {
+      return await this.jwtService.verifyAsync<TokenPayload>(token, {
         secret: this.jwtSecret,
       });
     } catch {

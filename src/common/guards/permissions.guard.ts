@@ -6,6 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { Request } from 'express';
 import { UserService } from '../../modules/user/user.service';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 
@@ -26,7 +27,7 @@ export class PermissionsGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<Request>();
     const userId = request.user?.id;
 
     if (!userId) {
