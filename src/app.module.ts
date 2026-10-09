@@ -32,7 +32,9 @@ import { AppController } from './app.controller';
         GOOGLE_CLIENT_SECRET: Joi.string().optional().allow(''),
         GOOGLE_CALLBACK_URL: Joi.string().optional().allow(''),
       }),
-      validationOptions: { allowUnknown: true, abortEarly: true },
+      validationOptions: {
+        libraryOptions: { allowUnknown: true, abortEarly: true },
+      },
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
