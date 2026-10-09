@@ -145,8 +145,8 @@ describe('AuthService', () => {
       expect(mockJwtService.signAsync).toHaveBeenCalledWith(
         { id: user.id, email: user.email },
         expect.objectContaining({
-          secret: expect.any(String),
-          expiresIn: expect.any(String),
+          secret: expect.any(String) as string,
+          expiresIn: expect.any(String) as string,
         }),
       );
       expect(token).toBe(fakeToken);
