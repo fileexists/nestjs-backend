@@ -25,7 +25,7 @@
     "migration:show": "npx typeorm-ts-node-commonjs migration:show -d typeorm.config.ts"
   },
   "dependencies": {
-    "@nestjs/common": "^11.2.1",
+    "@nestjs/common": "^11.2.3",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.2.1",
     "@nestjs/jwt": "^11.0.0",
