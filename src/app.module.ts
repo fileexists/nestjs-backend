@@ -4,8 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import * as Joi from 'joi';
-import { User } from './common/entities/user.entity';
-import { Permission } from './common/entities/permission.entity';
+import { join } from 'path';
+import { ENTITIES } from './common/entities';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { PermissionModule } from './modules/permission/permission.module';
@@ -17,6 +17,8 @@ import { AppController } from './app.controller';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      // I test non devono dipendere dal .env di sviluppo (DB e segreti veri).
+      ignoreEnvFile: process.env.NODE_ENV === 'test',
       validationSchema: Joi.object({
         NODE_ENV: Joi.string()
           .valid('development', 'production', 'test')
@@ -27,6 +29,8 @@ import { AppController } from './app.controller';
         JWT_EXPIRATION: Joi.string().default('15m'),
         REFRESH_TOKEN_EXPIRATION: Joi.string().default('7d'),
         DATABASE_URL: Joi.string().required(),
+        // Applica le migrazioni all'avvio (default: no, si lanciano con `yarn migration:run`).
+        DB_MIGRATIONS_RUN: Joi.boolean().default(false),
         CORS_ORIGIN: Joi.string().default('*'),
         GOOGLE_CLIENT_ID: Joi.string().optional().allow(''),
         GOOGLE_CLIENT_SECRET: Joi.string().optional().allow(''),
@@ -42,8 +46,13 @@ import { AppController } from './app.controller';
       useFactory: (configService: ConfigService) => ({
         type: 'postgres',
         url: configService.get<string>('DATABASE_URL'),
-        entities: [User, Permission],
-        synchronize: configService.get<string>('NODE_ENV') === 'development',
+        entities: ENTITIES,
+        migrations: [
+          join(__dirname, '..', 'database', 'migrations', '*.{js,ts}'),
+        ],
+        migrationsRun: configService.get<boolean>('DB_MIGRATIONS_RUN') ?? false,
+        // Lo schema si evolve SOLO con le migrazioni (database/migrations/).
+        synchronize: false,
         logging: configService.get<string>('NODE_ENV') === 'development',
       }),
     }),

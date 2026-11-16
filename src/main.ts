@@ -1,30 +1,20 @@
 import 'reflect-metadata';
-import { NestFactory, Reflector } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import {
-  ValidationPipe,
-  Logger,
-  ClassSerializerInterceptor,
-} from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
+import { configureApp } from './app.setup';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // Trust the first proxy hop (nginx/Caddy) so req.ip and the ThrottlerGuard
-  // see the real client IP instead of bucketing every request under the proxy's IP.
-  app.set('trust proxy', 1);
-
   app.enableShutdownHooks();
-  app.setGlobalPrefix('api', { exclude: ['health'] });
+  configureApp(app);
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') ?? 3000;
@@ -40,24 +30,10 @@ async function bootstrap(): Promise<void> {
         configService.get<string>('NODE_ENV') === 'production',
     }),
   );
-  app.use(cookieParser());
   app.enableCors({
     origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
     credentials: true,
   });
-
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
-  app.useGlobalFilters(new HttpExceptionFilter());
-  app.useGlobalInterceptors(
-    new RequestIdInterceptor(),
-    new ClassSerializerInterceptor(app.get(Reflector)),
-  );
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('NestJS Auth & Roles')
