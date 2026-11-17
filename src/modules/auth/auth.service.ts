@@ -40,6 +40,9 @@ import { TokenPayload } from '../../common/interfaces/jwt-payload.interface';
 /** Percorso del cookie del refresh token: solo le rotte di autenticazione. */
 export const REFRESH_COOKIE_PATH = `/${GLOBAL_PREFIX}/auth`;
 
+/** Tetto ai confronti di riempimento (2^5 - 1): oltre, pareggiare il costo non ha piu' senso. */
+const MAX_COST_PADDING_COMPARES = 31;
+
 /** Risposta identica per email nuova ed email gia' registrata (nessun indizio sull'esistenza dell'account). */
 export const REGISTRATION_ACCEPTED_MESSAGE =
   'If the address can be registered, an email with the next steps has been sent. Check your inbox.';
@@ -53,8 +56,8 @@ export class AuthService {
   private readonly refreshTokenExpiration: string;
   /** Costo bcrypt (BCRYPT_ROUNDS, default 12). */
   private readonly bcryptRounds: number;
-  /** Hash fittizio con lo stesso costo: per confrontare comunque una password se l'utente non esiste. */
-  private dummyHash?: Promise<string>;
+  /** Hash fittizi (uno per costo): per confrontare comunque una password se l'utente non esiste. */
+  private readonly dummyHashes = new Map<number, Promise<string>>();
   /** Tolleranza (ms) per il riuso di un refresh token appena ruotato (richieste parallele). 0 = nessuna. */
   private readonly reuseGraceMs: number;
 
@@ -97,13 +100,38 @@ export class AuthService {
     return bcrypt.hash(password, this.bcryptRounds);
   }
 
-  /** Hash di una password casuale al costo attuale (calcolato una volta sola). */
-  private getDummyHash(): Promise<string> {
-    this.dummyHash ??= bcrypt.hash(
-      randomBytes(24).toString('base64url'),
-      this.bcryptRounds,
+  /** Hash di una password casuale al costo indicato (calcolato una volta sola per costo). */
+  private getDummyHash(rounds = this.bcryptRounds): Promise<string> {
+    let hash = this.dummyHashes.get(rounds);
+    if (!hash) {
+      hash = bcrypt.hash(randomBytes(24).toString('base64url'), rounds);
+      this.dummyHashes.set(rounds, hash);
+    }
+    return hash;
+  }
+
+  /**
+   * Un hash piu' economico di quello configurato (account creati prima di alzare BCRYPT_ROUNDS)
+   * si verifica molto prima dell'hash fittizio usato per gli indirizzi inesistenti: la differenza
+   * di tempo rivelerebbe quali email hanno un account. Si ripete quindi il confronto su un hash
+   * fittizio dello stesso costo, fino a pareggiare il lavoro.
+   */
+  private async equalizeCost(storedHash: string): Promise<void> {
+    let rounds: number;
+    try {
+      rounds = bcrypt.getRounds(storedHash);
+    } catch {
+      return; // non e' un hash bcrypt: il confronto vero ha gia' fallito subito
+    }
+    if (rounds >= this.bcryptRounds) return;
+    const missing = Math.min(
+      2 ** (this.bcryptRounds - rounds) - 1,
+      MAX_COST_PADDING_COMPARES,
     );
-    return this.dummyHash;
+    const dummy = await this.getDummyHash(rounds);
+    for (let i = 0; i < missing; i++) {
+      await bcrypt.compare('cost-padding', dummy);
+    }
   }
 
   async comparePasswords(
@@ -383,6 +411,7 @@ export class AuthService {
 
     const hash = user?.password ?? (await this.getDummyHash());
     const matches = await this.comparePasswords(dto.password ?? '', hash);
+    if (user?.password) await this.equalizeCost(user.password);
     const valid = !!user?.password && !!dto.password && matches;
 
     if (!valid) {

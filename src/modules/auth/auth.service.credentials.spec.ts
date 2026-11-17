@@ -187,6 +187,47 @@ describe('AuthService - credenziali', () => {
       expect(bcryptCompare).toHaveBeenCalledTimes(1);
     });
 
+    describe('hash con costo inferiore a BCRYPT_ROUNDS (account precedenti)', () => {
+      const wrong = { email: 'mario@example.com', password: 'Wrong-Passw0rd' };
+
+      it('si pareggia il lavoro con confronti fittizi: i tempi non rivelano che l account esiste', async () => {
+        const stronger = await build({ BCRYPT_ROUNDS: 6 });
+        userService.getUserByEmail.mockResolvedValue(
+          buildUser({ password: hash }), // costo 4: 4 volte piu' veloce di un hash a 6
+        );
+
+        await expect(
+          stronger.login(wrong, asResponse(buildResponse())),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+
+        // 1 confronto vero + (2^(6-4) - 1) fittizi = lavoro pari a un hash a costo 6
+        expect(bcryptCompare).toHaveBeenCalledTimes(4);
+      });
+
+      it('con costo uguale o superiore resta un solo confronto', async () => {
+        const looser = await build({ BCRYPT_ROUNDS: 4 });
+        userService.getUserByEmail.mockResolvedValue(
+          buildUser({ password: hash }),
+        );
+
+        await expect(
+          looser.login(wrong, asResponse(buildResponse())),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+
+        expect(bcryptCompare).toHaveBeenCalledTimes(1);
+      });
+
+      it('un hash non valido nel database non fa esplodere il login', async () => {
+        userService.getUserByEmail.mockResolvedValue(
+          buildUser({ password: 'not-a-bcrypt-hash' }),
+        );
+
+        await expect(
+          service.login(wrong, asResponse(buildResponse())),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+      });
+    });
+
     it("l'hash fittizio si calcola una sola volta e si riusa", async () => {
       userService.getUserByEmail.mockResolvedValue(null);
 
