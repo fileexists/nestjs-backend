@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import { MaxBytes } from './max-bytes.decorator';
 import { NormalizeEmail } from './normalize-email.decorator';
 
 export class VerifyEmailDTO {
@@ -39,5 +40,6 @@ export class ResetPasswordDTO {
   @IsString()
   @MinLength(8)
   @MaxLength(72)
+  @MaxBytes(72)
   password: string;
 }
