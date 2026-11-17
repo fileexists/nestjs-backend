@@ -63,7 +63,8 @@ async function boot(db: DataSource, options: HarnessOptions): Promise<Harness> {
   const app = moduleRef.createNestApplication<NestExpressApplication>();
   configureApp(app);
   await app.init();
-  const google = new FakeGoogle().install();
+  const google = new FakeGoogle();
+  google.installIfAvailable();
 
   return {
     app,

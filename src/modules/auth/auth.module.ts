@@ -12,7 +12,11 @@ import { AuthTokenService } from './auth-token.service';
 import { MailModule } from '../mail/mail.module';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
-import { GoogleStrategy } from './strategies/google.strategy';
+import {
+  GoogleStrategy,
+  isGoogleConfigured,
+} from './strategies/google.strategy';
+import { GoogleCallbackExceptionFilter } from './google-callback.filter';
 import { UserModule } from '../user/user.module';
 import { PermissionModule } from '../permission/permission.module';
 import type { StringValue } from 'ms';
@@ -44,7 +48,17 @@ import type { StringValue } from 'ms';
     AuthTokenService,
     RefreshTokenService,
     AuthCleanupService,
-    GoogleStrategy,
+    GoogleCallbackExceptionFilter,
+    // Provider opzionale: senza GOOGLE_* non si registra nessuna strategia e gli
+    // endpoint Google rispondono 501 (vedi i guard).
+    {
+      provide: GoogleStrategy,
+      useFactory: (configService: ConfigService) =>
+        isGoogleConfigured(configService)
+          ? new GoogleStrategy(configService)
+          : null,
+      inject: [ConfigService],
+    },
   ],
   controllers: [AuthController],
   exports: [AuthService],

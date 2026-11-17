@@ -1,4 +1,8 @@
-import { ExecutionContext, Injectable } from '@nestjs/common';
+import {
+  ExecutionContext,
+  Injectable,
+  NotImplementedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
@@ -10,8 +14,22 @@ import {
   verifyOAuthState,
 } from '../../modules/auth/oauth-state';
 import { GoogleAuthException } from '../../modules/auth/google-auth.exception';
+import {
+  frontendOrigins,
+  resolveRedirectIndex,
+} from '../../modules/auth/frontend-redirect';
+import { isGoogleConfigured } from '../../modules/auth/strategies/google.strategy';
 
 type CanActivateResult = boolean | Promise<boolean> | Observable<boolean>;
+
+/** Senza GOOGLE_* il provider e' disattivato: 501 invece di una strategia con credenziali finte. */
+function assertGoogleConfigured(configService: ConfigService): void {
+  if (!isGoogleConfigured(configService)) {
+    throw new NotImplementedException(
+      'Google login is not configured on this server.',
+    );
+  }
+}
 
 /**
  * Avvio del flusso (GET /auth/google): genera il `state`, lo mette in un cookie
@@ -25,12 +43,22 @@ export class GoogleOAuthGuard extends AuthGuard('google') {
   }
 
   canActivate(context: ExecutionContext): CanActivateResult {
+    assertGoogleConfigured(this.configService);
     const http = context.switchToHttp();
     const request = http.getRequest<Request>();
     const response = http.getResponse<Response>();
 
+    // Origine di ritorno: solo tra quelle della whitelist FRONTEND_URL; si firma l'indice.
+    const redirectIndex =
+      request.query.redirect_to === undefined
+        ? 0
+        : resolveRedirectIndex(
+            frontendOrigins(this.configService),
+            request.query.redirect_to,
+          );
     const { state, cookie } = createOAuthState(
       this.configService.getOrThrow<string>('JWT_SECRET'),
+      redirectIndex,
     );
     response.cookie(
       OAUTH_STATE_COOKIE,
@@ -60,6 +88,7 @@ export class GoogleCallbackGuard extends AuthGuard('google') {
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    assertGoogleConfigured(this.configService);
     const http = context.switchToHttp();
     const request = http.getRequest<Request>();
     const response = http.getResponse<Response>();

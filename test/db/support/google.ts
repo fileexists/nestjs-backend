@@ -39,6 +39,18 @@ export class FakeGoogle {
   private readonly userInfoByCode = new Map<string, GoogleUserInfo>();
   private counter = 0;
 
+  /** Installa gli stub se la strategia Passport "google" e' registrata. Ritorna false se il provider e' disattivato. */
+  installIfAvailable(): boolean {
+    const strategy = (
+      passport as unknown as {
+        _strategy(name: string): unknown;
+      }
+    )._strategy('google');
+    if (!strategy) return false;
+    this.install();
+    return true;
+  }
+
   install(): this {
     const strategy = (
       passport as unknown as {

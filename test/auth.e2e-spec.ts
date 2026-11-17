@@ -555,7 +555,7 @@ describe('AuthController (e2e)', () => {
   // =========================================================================
 
   describe('GET /auth/google/callback', () => {
-    it('should create a new user and return 200 when the Google account has no prior record', async () => {
+    it('should create a new user, set the session cookie and redirect to the frontend when the Google account has no prior record', async () => {
       const overriddenApp = await createGoogleOverrideApp({
         googleId: 'brand-new-google-id',
         email: 'brandnew@gmail.com',
@@ -564,10 +564,12 @@ describe('AuthController (e2e)', () => {
 
       const response = await req(overriddenApp)
         .get('/api/auth/google/callback')
-        .expect(200);
-      const body = response.body as ApiResponseBody;
+        .redirects(0)
+        .expect(302);
 
-      expect(body.message).toBe('Authentication with google was successful.');
+      expect(response.headers.location).toBe(
+        'http://localhost:3000/auth/callback?status=success',
+      );
 
       const cookies: string[] =
         (response.headers['set-cookie'] as unknown as string[]) ?? [];
@@ -576,7 +578,7 @@ describe('AuthController (e2e)', () => {
       await overriddenApp.close();
     });
 
-    it('should update googleId and return 200 when an existing local user signs in with Google', async () => {
+    it('should link googleId and redirect to the frontend when an existing verified local user signs in with Google', async () => {
       const localUserWithoutGoogle: User = {
         ...LOCAL_USER,
         googleId: undefined,
@@ -589,12 +591,14 @@ describe('AuthController (e2e)', () => {
         name: 'Local User',
       });
 
-      const response = await req(overriddenApp)
+      await req(overriddenApp)
         .get('/api/auth/google/callback')
-        .expect(200);
-      const body = response.body as ApiResponseBody;
+        .redirects(0)
+        .expect(302);
 
-      expect(body.message).toBe('Authentication with google was successful.');
+      expect(db.get(LOCAL_USER.email)?.googleId).toBe(
+        'new-google-id-for-local',
+      );
 
       await overriddenApp.close();
     });

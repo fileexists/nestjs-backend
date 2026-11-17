@@ -341,7 +341,6 @@ export class AuthService {
       await this.generateJwtToken(user),
       await this.generateRefreshToken(user),
     );
-    res.json({ message: 'Authentication with google was successful.' });
   }
 
   /**

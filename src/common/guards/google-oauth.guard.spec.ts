@@ -1,4 +1,8 @@
-import { ExecutionContext } from '@nestjs/common';
+import {
+  BadRequestException,
+  ExecutionContext,
+  NotImplementedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleAuthException } from '../../modules/auth/google-auth.exception';
 import {
@@ -8,10 +12,19 @@ import {
 import { GoogleCallbackGuard, GoogleOAuthGuard } from './google-oauth.guard';
 
 const SECRET = 'test-secret-with-enough-length-0123456789';
-const config = {
-  getOrThrow: () => SECRET,
-  get: (key: string) => (key === 'NODE_ENV' ? 'test' : undefined),
-} as unknown as ConfigService;
+const values: Record<string, string> = {
+  NODE_ENV: 'test',
+  GOOGLE_CLIENT_ID: 'id',
+  GOOGLE_CLIENT_SECRET: 'secret',
+  GOOGLE_CALLBACK_URL: 'http://localhost:5000/api/auth/google/callback',
+  FRONTEND_URL: 'https://app.example.com,https://admin.example.com',
+};
+const configWith = (overrides: Record<string, string> = {}) =>
+  ({
+    getOrThrow: () => SECRET,
+    get: (key: string) => ({ ...values, ...overrides })[key],
+  }) as unknown as ConfigService;
+const config = configWith();
 
 const passportParent = () =>
   Object.getPrototypeOf(GoogleCallbackGuard.prototype) as {
@@ -117,7 +130,7 @@ describe('GoogleOAuthGuard (avvio flusso, B3/C2)', () => {
   afterAll(() => passport.mockRestore());
 
   it('genera lo state, imposta il cookie firmato e lo passa a Passport', async () => {
-    const request: Record<string, unknown> = {};
+    const request: Record<string, unknown> = { query: {} };
     const { context, response } = contextWith(request);
 
     await guard.canActivate(context);
@@ -147,5 +160,73 @@ describe('GoogleOAuthGuard (avvio flusso, B3/C2)', () => {
     >;
     expect(options.accessType).toBeUndefined();
     expect(options.prompt).toBeUndefined();
+  });
+});
+
+describe('guard Google con provider non configurato (C2)', () => {
+  const unconfigured = configWith({ GOOGLE_CLIENT_SECRET: '' });
+
+  it.each([
+    ['avvio', () => new GoogleOAuthGuard(unconfigured)],
+    ['callback', () => new GoogleCallbackGuard(unconfigured)],
+  ])(
+    '%s: 501 e nessun cookie, senza chiamare Passport',
+    async (_name, build) => {
+      const guard = build();
+      const { context, response } = contextWith({ cookies: {}, query: {} });
+
+      const error = await Promise.resolve()
+        .then(() => guard.canActivate(context))
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(NotImplementedException);
+      expect((error as NotImplementedException).getStatus()).toBe(501);
+      expect(response.cookie).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('GoogleOAuthGuard - redirect_to (C1)', () => {
+  const guard = new GoogleOAuthGuard(config);
+
+  beforeAll(() => {
+    jest.spyOn(passportParent(), 'canActivate').mockResolvedValue(true);
+  });
+  afterAll(() => jest.restoreAllMocks());
+
+  it('firma nel cookie l indice dell origine scelta (non l URL)', async () => {
+    const request = { query: { redirect_to: 'https://admin.example.com' } };
+    const { context, response } = contextWith(request);
+
+    await guard.canActivate(context);
+
+    const [, value] = response.cookie.mock.calls[0] as [string, string];
+    expect(value.split('.')[1]).toBe('1');
+    expect(value).not.toContain('admin.example.com');
+  });
+
+  it.each([
+    'https://evil.example.com',
+    'https://app.example.com.evil.com',
+    'https://app.example.com@evil.com',
+    '//evil.com',
+    'javascript:alert(1)',
+    '',
+  ])('rifiuta redirect_to=%j con 400 e non imposta cookie', async (evil) => {
+    const { context, response } = contextWith({ query: { redirect_to: evil } });
+
+    const error = await Promise.resolve()
+      .then(() => guard.canActivate(context))
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(response.cookie).not.toHaveBeenCalled();
+  });
+
+  it('rifiuta un redirect_to non stringa (es. array)', async () => {
+    const { context } = contextWith({ query: { redirect_to: ['a', 'b'] } });
+    await expect(
+      Promise.resolve().then(() => guard.canActivate(context)),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

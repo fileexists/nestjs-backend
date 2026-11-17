@@ -9,7 +9,6 @@ import { createHarness, Harness } from './support/harness';
 import { googleLogin } from './support/google';
 import {
   PASSWORD,
-  browser,
   cookieNames,
   createVerifiedUser,
   http,
@@ -167,25 +166,17 @@ describe('A1 - pre-hijacking (e2e, PostgreSQL vero)', () => {
       expect(row?.provider).toBe('local');
     });
 
-    it('risponde 401 con un messaggio chiaro quando la strategia rifiuta il profilo', async () => {
-      const agent = browser(h);
-      const init = await agent.get('/api/auth/google');
-      const state = new URL(init.headers.location).searchParams.get('state');
-      const res = await agent.get('/api/auth/google/callback').query({
-        code: h.google.codeFor({
-          sub: 's9',
-          email: 'x@example.com',
-          email_verified: false,
-        }),
-        ...(state ? { state } : {}),
+    it("l'email non verificata torna al frontend con un motivo chiaro (il 401 con messaggio e' della strategia: vedi google-profile.spec)", async () => {
+      const { callback } = await googleLogin(h.app, h.google, {
+        sub: 's9',
+        email: 'x@example.com',
+        email_verified: false,
       });
-      // Fino alla sezione C1 il callback e' JSON: 401 con messaggio. Dopo C1 e' un redirect con l'errore.
-      if (res.status === 401) {
-        expect(JSON.stringify(res.body)).toMatch(/not verified/i);
-      } else {
-        expect(res.status).toBe(302);
-        expect(res.headers.location).toMatch(/status=error/);
-      }
+
+      expect(callback.status).toBe(302);
+      const url = new URL(callback.headers.location);
+      expect(url.searchParams.get('status')).toBe('error');
+      expect(url.searchParams.get('reason')).toBe('email_unverified');
     });
   });
 });

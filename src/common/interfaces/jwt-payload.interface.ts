@@ -15,8 +15,6 @@ export interface GoogleProfilePayload {
   googleId?: string;
   email?: string;
   name?: string;
-  accessToken?: string;
-  refreshToken?: string;
 }
 
 declare global {

@@ -5,6 +5,7 @@ import {
   Get,
   UnauthorizedException,
   Res,
+  UseFilters,
   UseGuards,
   Req,
   HttpCode,
@@ -16,14 +17,19 @@ import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiResponse,
   ApiTags,
   ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
 import { AccountService } from './account.service';
+import { GoogleCallbackExceptionFilter } from './google-callback.filter';
+import { buildFrontendRedirect, frontendOrigins } from './frontend-redirect';
+import { GoogleProfilePayload } from '../../common/interfaces/jwt-payload.interface';
 import {
   ResendVerificationDTO,
   VerifyEmailDTO,
@@ -45,6 +51,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly accountService: AccountService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Post('logout')
@@ -197,11 +204,31 @@ export class AuthController {
 
   @Get('google/callback')
   @UseGuards(GoogleCallbackGuard)
-  @ApiOperation({ summary: 'Google OAuth callback handler' })
-  @ApiOkResponse({ description: 'Google authentication successful' })
-  @ApiUnauthorizedResponse({ description: 'Authentication failed' })
-  googleAuthRedirect(@Req() req: Request, @Res() res: Response): Promise<void> {
-    const googleUser = req.user as { email: string; googleId: string };
-    return this.authService.handleGoogleCallback(googleUser, res);
+  @UseFilters(GoogleCallbackExceptionFilter)
+  @ApiOperation({
+    summary:
+      'Google OAuth callback: sets the session cookies and redirects to the frontend',
+  })
+  @ApiResponse({
+    status: 302,
+    description:
+      'Redirect to FRONTEND_URL/auth/callback?status=success, or ?status=error&reason=<code>',
+  })
+  async googleAuthRedirect(
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    const googleUser = req.user as Required<
+      Pick<GoogleProfilePayload, 'email' | 'googleId'>
+    >;
+    await this.authService.handleGoogleCallback(googleUser, res);
+    res.redirect(
+      HttpStatus.FOUND,
+      buildFrontendRedirect(
+        frontendOrigins(this.configService),
+        req.oauthRedirectIndex ?? 0,
+        { status: 'success' },
+      ),
+    );
   }
 }
