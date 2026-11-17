@@ -75,6 +75,8 @@ const mockAuthService: jest.Mocked<AuthService> = {
   comparePasswords: jest.fn(),
   generateJwtToken: jest.fn(),
   generateRefreshToken: jest.fn(),
+  assertSessionCurrent: jest.fn(),
+  setAuthCookies: jest.fn(),
 } as unknown as jest.Mocked<AuthService>;
 
 const mockReflector = { getAllAndOverride: jest.fn() };
@@ -97,6 +99,7 @@ describe('AuthGuard', () => {
 
     guard = module.get<AuthGuard>(AuthGuard);
     mockAuthService.getCookieOptions.mockReturnValue(mockCookieOptions);
+    mockAuthService.assertSessionCurrent.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -188,6 +191,54 @@ describe('AuthGuard', () => {
       expect(mockAuthService.refreshTokens).toHaveBeenCalledWith(
         'valid.refresh.token',
       );
+      expect(mockAuthService.setAuthCookies).toHaveBeenCalledWith(
+        expect.anything(),
+        'new.access.token',
+        'new.refresh.token',
+      );
+    });
+  });
+
+  describe('when the access token is valid but its session was revoked (tokenVersion changed)', () => {
+    it('should reject with 401 and NOT attach the user', async () => {
+      mockReflector.getAllAndOverride.mockReturnValue(false);
+      mockJwtService.verifyAsync.mockResolvedValue({
+        id: 'uuid-1',
+        email: 'a@b.com',
+        tokenVersion: 0,
+      });
+      mockAuthService.assertSessionCurrent.mockRejectedValue(
+        new UnauthorizedException('User is not authenticated.'),
+      );
+
+      const ctx = buildContext({
+        authHeader: 'Bearer revoked.session.token',
+        refreshTokenCookie: 'some.refresh.token',
+      });
+
+      await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      expect(mockAuthService.assertSessionCurrent).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'uuid-1' }),
+      );
+      // sessione revocata: non si tenta nemmeno un refresh silenzioso
+      expect(mockAuthService.refreshTokens).not.toHaveBeenCalled();
+    });
+
+    it('should check the session of every valid token, not only the first', async () => {
+      mockReflector.getAllAndOverride.mockReturnValue(false);
+      mockJwtService.verifyAsync.mockResolvedValue({
+        id: 'uuid-1',
+        tokenVersion: 3,
+      });
+
+      await guard.canActivate(buildContext({ accessTokenCookie: 'a.b.c' }));
+
+      expect(mockAuthService.assertSessionCurrent).toHaveBeenCalledWith({
+        id: 'uuid-1',
+        tokenVersion: 3,
+      });
     });
   });
 

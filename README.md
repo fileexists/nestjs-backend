@@ -1,11 +1,13 @@
 # NestJS Auth Backend
 
-A production-ready authentication backend built with **NestJS 11**, **TypeORM**, and **PostgreSQL**.
+A production-ready authentication backend built with **NestJS 12**, **TypeORM**, and **PostgreSQL**.
 
 ## Features
 
-- JWT authentication with automatic refresh-token rotation
-- Google OAuth2 via Passport.js
+- JWT authentication with **real refresh-token rotation** (one-time tokens, reuse detection, revocation on logout)
+- Email verification, password reset, and uniform responses that don't reveal whether an account exists
+- Per-account progressive login lockout (on top of the per-IP rate limit)
+- Google OAuth2 via Passport.js (anti-CSRF `state`, verified email only, redirect to the frontend)
 - Role-based access control (RBAC) with a flexible `@Permissions()` decorator
 - PostgreSQL + TypeORM with migration support
 - Helmet security headers, rate limiting, global validation
@@ -18,11 +20,12 @@ A production-ready authentication backend built with **NestJS 11**, **TypeORM**,
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | NestJS 11 |
-| ORM | TypeORM 0.3 |
+| Framework | NestJS 12 |
+| ORM | TypeORM 1.x |
 | Database | PostgreSQL 17 |
 | Auth | JWT + Passport (local + Google OAuth2) |
-| Hashing | bcrypt (10 rounds) |
+| Hashing | bcrypt (`BCRYPT_ROUNDS`, default 12, transparent re-hash) |
+| Email | nodemailer (SMTP; Mailpit in development) |
 | Validation | class-validator + class-transformer |
 | Docs | Swagger / OpenAPI |
 | Testing | Jest + Supertest |
@@ -35,6 +38,8 @@ A production-ready authentication backend built with **NestJS 11**, **TypeORM**,
 ├── database/
 │   ├── migrations/          # TypeORM migrations
 │   └── seeds/               # Database seeders
+├── docs/
+│   └── PROGETTO.md          # design: Bearer API keys for the public widget (not implemented)
 ├── scripts/
 │   └── test-api.sh          # cURL integration tests
 ├── src/
@@ -44,7 +49,9 @@ A production-ready authentication backend built with **NestJS 11**, **TypeORM**,
 │   │   ├── entities/        # TypeORM entities (User, Permission)
 │   │   ├── filters/         # Global HTTP exception filter
 │   │   └── guards/          # AuthGuard, PermissionsGuard, GoogleOAuthGuard
+│   ├── config/              # environment validation (Joi)
 │   ├── modules/
+│   │   ├── mail/            # SMTP email (verification, reset, notices)
 │   │   ├── auth/            # JWT + Google OAuth, AuthService, AuthController
 │   │   │   └── strategies/  # GoogleStrategy
 │   │   ├── permission/      # Permission CRUD
@@ -61,10 +68,11 @@ A production-ready authentication backend built with **NestJS 11**, **TypeORM**,
 
 ## Quick Start
 
-### 1. Start PostgreSQL
+### 1. Start PostgreSQL (and Mailpit)
 
 ```bash
-docker-compose up -d
+docker compose up -d
+# Mailpit (development SMTP) UI: http://localhost:8025
 ```
 
 ### 2. Install dependencies
@@ -77,20 +85,40 @@ yarn install
 
 ```bash
 cp .env.sample .env
-# Edit .env — set JWT_SECRET, REFRESH_TOKEN_SECRET, and verify DATABASE_URL
+# Edit .env — set JWT_SECRET and REFRESH_TOKEN_SECRET (different from each other; in production
+# the placeholders from .env.sample are rejected at startup), and verify DATABASE_URL
 ```
 
 ### 4. Run migrations
 
 ```bash
-# Generate (after modifying entities):
-yarn migration:generate src/database/migrations/<MigrationName>
-
-# Apply:
+# Apply (REQUIRED: `synchronize` is off in every environment):
 yarn migration:run
+
+# Generate (after modifying entities):
+yarn migration:generate database/migrations/<MigrationName>
 ```
 
-In development, `synchronize: true` is active so the schema is auto-synced without migrations.
+The schema changes **only** through `database/migrations/`. To apply them at startup instead, set `DB_MIGRATIONS_RUN=true`.
+
+> **Existing databases:** `NormalizeEmails` renames duplicate accounts (same email apart from case) and archives them in `user_email_changes` (see below); local accounts created before `AddEmailVerification` start **unverified** and must verify their email (or reset their password) to log in with a password. Accounts created by `yarn seed` are verified. An admin created before this change can log in again after "forgot password", or you can verify the account by hand:
+
+```sql
+UPDATE users SET "emailVerifiedAt" = now() WHERE email = 'admin@example.com';
+```
+
+**New installs can ignore this.** `NormalizeEmails` only has work to do on a database that already holds emails with capital letters or stray spaces. On an empty (or already tidy) database it just adds the unique index on `lower(email)`, and the table below is never created.
+
+On an upgraded database that did need fixing, the migration creates **`user_email_changes`**: a one-off archive that the application never reads. Each row is an account whose email was touched, with the original value (`reason = 'normalized'`: only trimmed/lowercased; `reason = 'duplicate'`: same address as another account apart from case, so it was renamed to `name+dup-N-id@domain` and its password disabled). For duplicates it also keeps the old password hash and verification date, so nothing is lost if two people really did sign up with `Mario@x.com` and `mario@x.com`.
+
+Check whether there is anything to review:
+
+```sql
+SELECT reason, count(*) FROM user_email_changes GROUP BY reason;
+SELECT "originalEmail", "newEmail", "canonicalUserId" FROM user_email_changes WHERE reason = 'duplicate';
+```
+
+If there are no `duplicate` rows, or you have already sorted them out, drop the table by hand (`DROP TABLE user_email_changes;`): it holds old password hashes that no longer serve a purpose. The `down` of `NormalizeEmails` still works afterwards, it just has nothing to restore.
 
 ### 5. Seed the database
 
@@ -145,13 +173,18 @@ All routes below sit behind the global `/api` prefix (see [Project Structure](#p
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| POST | `/api/auth/register` | Register with email + password | Public |
-| POST | `/api/auth/login` | Login with email + password | Public |
-| POST | `/api/auth/logout` | Clear auth cookies | Public |
-| POST | `/api/auth/logout-all` | Revoke all sessions (bumps `tokenVersion`) | JWT |
+| POST | `/api/auth/register` | Register with email + password. Always `202` with the same body, whether or not the address exists | Public |
+| POST | `/api/auth/verify-email` | Confirm the email with the emailed token **and choose the password** (`{ token, password }`; replaces the one given at registration) | Public |
+| POST | `/api/auth/resend-verification` | Resend the verification email (uniform `202`) | Public |
+| POST | `/api/auth/login` | Login (requires a verified email; `429` when the account is temporarily locked) | Public |
+| POST | `/api/auth/refresh` | Rotate the refresh token (cookie `refresh_token`) | Public |
+| POST | `/api/auth/logout` | Revoke the current session and clear cookies | Public |
+| POST | `/api/auth/logout-all` | Revoke all sessions (bumps `tokenVersion`, revokes refresh tokens) | JWT |
+| POST | `/api/auth/forgot-password` | Request a reset link (uniform `202`) | Public |
+| POST | `/api/auth/reset-password` | Set a new password with the emailed token; revokes all sessions | Public |
 | GET | `/api/auth/validate` | Validate / refresh tokens | Public |
-| GET | `/api/auth/google` | Initiate Google OAuth | Public |
-| GET | `/api/auth/google/callback` | Google OAuth callback | Public |
+| GET | `/api/auth/google` | Initiate Google OAuth (`?redirect_to=<allowed origin>` optional). `501` if Google isn't configured | Public |
+| GET | `/api/auth/google/callback` | Sets the cookies and redirects to `FRONTEND_URL/auth/callback?status=success\|error[&reason=…]` | Public |
 
 ### User (`/api/user`)
 
@@ -233,12 +266,36 @@ Rate limiting: 100 requests per 60 seconds per IP.
 
 ## Token Strategy
 
-| Token | Storage | Expiry (default) | httpOnly |
-|-------|---------|-----------------|---------|
-| Access token | `access_token` cookie | 15 minutes | Yes |
-| Refresh token | `refresh_token` cookie | 7 days | Yes |
+| Token | Storage | Expiry (default) | Cookie `Path` | httpOnly |
+|-------|---------|-----------------|---------------|---------|
+| Access token | `access_token` cookie | 15 minutes | `/` | Yes |
+| Refresh token | `refresh_token` cookie | 7 days | `/api/auth` | Yes |
+| Trusted device | `trusted_device` cookie | 30 days | `/api/auth` | Yes |
 
-Tokens are automatically rotated on each refresh. Cookies get the `secure` flag automatically when `NODE_ENV=production`.
+- **Rotation:** every refresh marks the old token as used and issues a new one in the same *family* (`refresh_tokens` table, only the hash of the `jti` is stored). Presenting an already-used token revokes the whole family and bumps `tokenVersion`.
+- **Instant revocation:** the access token carries `tokenVersion`, checked on every request (one primary-key lookup): logout-all, reuse detection and password reset invalidate it immediately. A single-session `logout` revokes the refresh token; the access token of that session lives until it expires (≤ `JWT_EXPIRATION`).
+- **Refresh cookie path:** because it is only sent to `/api/auth/*`, clients renew with `POST /api/auth/refresh` (or `GET /api/auth/validate`), not through other routes. If a proxy changes the public path, rewrite the cookie path (`proxy_cookie_path /api/auth <public path>/auth;`).
+- `trusted_device` only lets the account owner log in (still with the right password) while the account is temporarily locked by someone else's failed attempts; it never skips the password check and is tied to the account and its `tokenVersion`.
+- Known limit: whoever knows an email can keep that account locked for new devices (up to `LOGIN_LOCK_MAX_SECONDS`) by sending wrong passwords; known devices, the password reset and the per-IP limit on `/auth/login` (5 per minute) soften it. A CAPTCHA would be the next step.
+- Cookies get the `secure` flag automatically when `NODE_ENV=production`. Expired tokens are cleaned up daily.
+
+---
+
+## Configuration
+
+See [`.env.sample`](.env.sample) for every variable. The ones introduced with the security hardening:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FRONTEND_URL` | `http://localhost:3000` | Whitelist (comma-separated origins) for email links and the Google redirect. Required, https-only in production |
+| `SMTP_HOST` / `SMTP_PORT` | `localhost` / `1025` | Email delivery (`SMTP_HOST` required in production). `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` optional |
+| `EMAIL_VERIFICATION_TTL` / `PASSWORD_RESET_TTL` | `24h` / `1h` | Lifetime of the emailed links |
+| `BCRYPT_ROUNDS` | `12` | bcrypt cost (≥ 10 in production) |
+| `LOGIN_MAX_FAILED_ATTEMPTS`, `LOGIN_LOCK_BASE_SECONDS`, `LOGIN_LOCK_MAX_SECONDS`, `LOGIN_ATTEMPT_WINDOW_SECONDS` | `5`, `60`, `900`, `1800` | Progressive per-account lockout |
+| `REFRESH_REUSE_GRACE_SECONDS` | `10` | A refresh token used twice within this many seconds is just rejected (parallel requests); later, it counts as theft and revokes the session family. `0` = always theft |
+| `DB_MIGRATIONS_RUN` | `false` | Apply migrations at startup |
+
+Without `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_CALLBACK_URL` the Google provider is **disabled** and its endpoints answer `501`.
 
 ---
 
@@ -251,9 +308,19 @@ yarn test
 # Unit tests with coverage
 yarn test:cov
 
-# e2e tests (no real database needed — mocked)
+# e2e tests with mocked repositories (no database needed)
 yarn test:e2e
+
+# e2e tests against a REAL PostgreSQL (schema rebuilt from the migrations)
+docker compose --profile test up -d postgres-test      # port 5433, data in tmpfs
+docker compose up -d mailpit                            # optional: also runs the real-SMTP test
+E2E_MAILPIT_API=http://localhost:8025 yarn test:e2e:db
+
+# everything
+yarn test:all
 ```
+
+`yarn test:e2e:db` refuses to run on any database that isn't local and named `*e2e*`/`*test*` (it drops the schema). Override the URL with `E2E_DATABASE_URL`. The Google flow is exercised with the **real** Passport strategy, with only its two network calls stubbed. CI runs the same suite on a GitHub runner with PostgreSQL and Mailpit as service containers (`e2e-db` job).
 
 ### Manual cURL Tests
 
@@ -271,7 +338,7 @@ yarn test:e2e
 
 ```bash
 # Generate a new migration after changing entities
-yarn migration:generate src/database/migrations/CreateUsersTable
+yarn migration:generate database/migrations/CreateUsersTable
 
 # Apply pending migrations
 yarn migration:run

@@ -18,6 +18,16 @@ import { AuthGuard } from './../src/common/guards/auth.guard';
 import { PermissionsGuard } from './../src/common/guards/permissions.guard';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { req } from './utils/http';
+import {
+  AuthToken,
+  LoginAttempt,
+  RefreshToken,
+  MailService,
+  authTokenRepositoryMock,
+  loginAttemptRepositoryMock,
+  refreshTokenRepositoryMock,
+  mailServiceMock,
+} from './utils/mocks';
 
 describe('AppModule bootstrap (e2e)', () => {
   let app: INestApplication;
@@ -55,6 +65,14 @@ describe('AppModule bootstrap (e2e)', () => {
       .useValue({ canActivate: () => true })
       .overrideProvider(ThrottlerGuard)
       .useValue({ canActivate: () => true })
+      .overrideProvider(getRepositoryToken(AuthToken))
+      .useValue(authTokenRepositoryMock())
+      .overrideProvider(getRepositoryToken(RefreshToken))
+      .useValue(refreshTokenRepositoryMock())
+      .overrideProvider(getRepositoryToken(LoginAttempt))
+      .useValue(loginAttemptRepositoryMock())
+      .overrideProvider(MailService)
+      .useValue(mailServiceMock())
       .compile();
 
     app = moduleFixture.createNestApplication();

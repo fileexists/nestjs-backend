@@ -23,7 +23,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exceptionResponse
         : (exceptionResponse as Record<string, unknown>).message;
 
-    this.logger.error(`${request.method} ${request.url} → ${status}`);
+    // Solo il percorso: la query string puo' contenere codici monouso (es. `code` di Google).
+    this.logger.error(`${request.method} ${request.path} → ${status}`);
 
     response.status(status).json({
       statusCode: status,

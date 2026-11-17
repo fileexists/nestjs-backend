@@ -30,8 +30,21 @@ import { Permission } from '../src/common/entities/permission.entity';
 import { AuthService } from '../src/modules/auth/auth.service';
 import { AuthGuard } from '../src/common/guards/auth.guard';
 import { PermissionsGuard } from '../src/common/guards/permissions.guard';
-import { GoogleOAuthGuard } from '../src/common/guards/google-oauth.guard';
+import {
+  GoogleCallbackGuard,
+  GoogleOAuthGuard,
+} from '../src/common/guards/google-oauth.guard';
 import { req, ApiResponseBody } from './utils/http';
+import {
+  AuthToken,
+  LoginAttempt,
+  RefreshToken,
+  MailService,
+  authTokenRepositoryMock,
+  loginAttemptRepositoryMock,
+  refreshTokenRepositoryMock,
+  mailServiceMock,
+} from './utils/mocks';
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
@@ -51,6 +64,7 @@ const LOCAL_USER: User = {
   provider: 'local',
   googleId: undefined,
   tokenVersion: 0,
+  emailVerifiedAt: new Date('2024-01-01T00:00:00.000Z'),
   permissions: [USER_PERMISSION],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -63,6 +77,7 @@ const GOOGLE_USER: User = {
   provider: 'google',
   googleId: 'google-oauth-id-123',
   tokenVersion: 0,
+  emailVerifiedAt: new Date('2024-01-01T00:00:00.000Z'),
   permissions: [USER_PERMISSION],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -103,6 +118,7 @@ const mockUserRepository = {
       googleId: user.googleId,
       provider: user.provider,
       tokenVersion: user.tokenVersion ?? 0,
+      emailVerifiedAt: user.emailVerifiedAt,
       permissions: user.permissions ?? [],
       createdAt: user.createdAt ?? new Date(),
       updatedAt: new Date(),
@@ -191,6 +207,16 @@ async function createGoogleOverrideApp(
     .useValue({ canActivate: () => Promise.resolve(true) })
     .overrideGuard(GoogleOAuthGuard)
     .useValue(googleGuardStub)
+    .overrideGuard(GoogleCallbackGuard)
+    .useValue(googleGuardStub)
+    .overrideProvider(getRepositoryToken(AuthToken))
+    .useValue(authTokenRepositoryMock())
+    .overrideProvider(getRepositoryToken(RefreshToken))
+    .useValue(refreshTokenRepositoryMock())
+    .overrideProvider(getRepositoryToken(LoginAttempt))
+    .useValue(loginAttemptRepositoryMock())
+    .overrideProvider(MailService)
+    .useValue(mailServiceMock())
     .compile();
 
   const customApp = moduleFixture.createNestApplication();
@@ -225,6 +251,14 @@ describe('AuthController (e2e)', () => {
       .useValue({ canActivate: () => Promise.resolve(true) })
       .overrideProvider(ThrottlerGuard)
       .useValue({ canActivate: () => Promise.resolve(true) })
+      .overrideProvider(getRepositoryToken(AuthToken))
+      .useValue(authTokenRepositoryMock())
+      .overrideProvider(getRepositoryToken(RefreshToken))
+      .useValue(refreshTokenRepositoryMock())
+      .overrideProvider(getRepositoryToken(LoginAttempt))
+      .useValue(loginAttemptRepositoryMock())
+      .overrideProvider(MailService)
+      .useValue(mailServiceMock())
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -320,23 +354,25 @@ describe('AuthController (e2e)', () => {
   // =========================================================================
 
   describe('POST /auth/register', () => {
-    it('should return 201 and the new userId when registering a brand-new email', async () => {
+    const ACCEPTED =
+      'If the address can be registered, an email with the next steps has been sent. Check your inbox.';
+
+    it('should return 202 with a uniform message (no userId) when registering a brand-new email', async () => {
       const response = await req(app)
         .post('/api/auth/register')
         .send({ email: 'newuser@example.com', password: 'StrongPass1!' })
-        .expect(201);
+        .expect(202);
       const body = response.body as ApiResponseBody;
 
-      expect(body.message).toBe('User registered successfully');
-      expect(body.userId).toBeDefined();
-      expect(typeof body.userId).toBe('string');
+      expect(body.message).toBe(ACCEPTED);
+      expect(body.userId).toBeUndefined();
     });
 
     it('should store a bcrypt-hashed password (not plain text) in the repository', async () => {
       await req(app)
         .post('/api/auth/register')
         .send({ email: 'hashed@example.com', password: 'PlainText123' })
-        .expect(201);
+        .expect(202);
 
       const savedUser = db.get('hashed@example.com')!;
       expect(savedUser.password).not.toBe('PlainText123');
@@ -347,20 +383,23 @@ describe('AuthController (e2e)', () => {
       await req(app)
         .post('/api/auth/register')
         .send({ email: 'withperm@example.com', password: 'Pass1234!' })
-        .expect(201);
+        .expect(202);
 
       const savedUser = db.get('withperm@example.com')!;
       expect(savedUser.permissions).toEqual([USER_PERMISSION]);
     });
 
-    it('should return 400 when the email is already registered', async () => {
+    it('should answer EXACTLY the same (202, same body) when the email is already registered, without touching the account', async () => {
+      const before = { ...db.get(LOCAL_USER.email)! };
+
       const response = await req(app)
         .post('/api/auth/register')
         .send({ email: LOCAL_USER.email, password: 'AnyPassword1' })
-        .expect(400);
+        .expect(202);
       const body = response.body as ApiResponseBody;
 
-      expect(body.message).toBe('User already registered');
+      expect(body.message).toBe(ACCEPTED);
+      expect(db.get(LOCAL_USER.email)!.password).toBe(before.password);
     });
   });
 
@@ -409,14 +448,15 @@ describe('AuthController (e2e)', () => {
       expect(body.message).toBe('Invalid email or password');
     });
 
-    it('should return 401 when a Google-only user tries to login with a password', async () => {
+    it('should return the SAME generic 401 when a Google-only user tries to login with a password', async () => {
       const response = await req(app)
         .post('/api/auth/login')
         .send({ email: GOOGLE_USER.email, password: 'anypassword' })
         .expect(401);
       const body = response.body as ApiResponseBody;
 
-      expect(body.message).toBe('Please login via google.');
+      // Niente piu' "Please login via google.": stessa risposta di password errata/utente inesistente.
+      expect(body.message).toBe('Invalid email or password');
     });
 
     it('should update provider to "combined" when a google user logs in with a password', async () => {
@@ -458,6 +498,7 @@ describe('AuthController (e2e)', () => {
       const token = buildValidAccessToken(app, {
         id: LOCAL_USER.id,
         email: LOCAL_USER.email,
+        tokenVersion: LOCAL_USER.tokenVersion,
         permissions: LOCAL_USER.permissions,
       });
 
@@ -526,7 +567,7 @@ describe('AuthController (e2e)', () => {
   // =========================================================================
 
   describe('GET /auth/google/callback', () => {
-    it('should create a new user and return 200 when the Google account has no prior record', async () => {
+    it('should create a new user, set the session cookie and redirect to the frontend when the Google account has no prior record', async () => {
       const overriddenApp = await createGoogleOverrideApp({
         googleId: 'brand-new-google-id',
         email: 'brandnew@gmail.com',
@@ -535,10 +576,12 @@ describe('AuthController (e2e)', () => {
 
       const response = await req(overriddenApp)
         .get('/api/auth/google/callback')
-        .expect(200);
-      const body = response.body as ApiResponseBody;
+        .redirects(0)
+        .expect(302);
 
-      expect(body.message).toBe('Authentication with google was successful.');
+      expect(response.headers.location).toBe(
+        'http://localhost:3000/auth/callback?status=success',
+      );
 
       const cookies: string[] =
         (response.headers['set-cookie'] as unknown as string[]) ?? [];
@@ -547,7 +590,7 @@ describe('AuthController (e2e)', () => {
       await overriddenApp.close();
     });
 
-    it('should update googleId and return 200 when an existing local user signs in with Google', async () => {
+    it('should link googleId and redirect to the frontend when an existing verified local user signs in with Google', async () => {
       const localUserWithoutGoogle: User = {
         ...LOCAL_USER,
         googleId: undefined,
@@ -560,12 +603,14 @@ describe('AuthController (e2e)', () => {
         name: 'Local User',
       });
 
-      const response = await req(overriddenApp)
+      await req(overriddenApp)
         .get('/api/auth/google/callback')
-        .expect(200);
-      const body = response.body as ApiResponseBody;
+        .redirects(0)
+        .expect(302);
 
-      expect(body.message).toBe('Authentication with google was successful.');
+      expect(db.get(LOCAL_USER.email)?.googleId).toBe(
+        'new-google-id-for-local',
+      );
 
       await overriddenApp.close();
     });

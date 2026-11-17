@@ -3,7 +3,14 @@ name: CI
 on:
   push:
     branches: [master]
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
+    paths-ignore: ['**.md', 'docs/**']
+
+# Una nuova esecuzione sullo stesso ref annulla quella in corso: risparmia minuti.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
@@ -19,11 +26,58 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Typecheck
+        run: yarn typecheck
+
       - name: Build
         run: yarn build
 
       - name: Unit tests
         run: yarn test
 
-      - name: E2E tests
+      - name: E2E tests (repository mockati)
         run: yarn test:e2e
+
+  # E2E contro un PostgreSQL VERO. Il database gira come service container sul
+  # runner stesso (locale, quindi veloce, nessun DB remoto e nessun segreto):
+  # lo schema viene ricreato dalle migrazioni a ogni esecuzione.
+  e2e-db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: nestjs
+          POSTGRES_PASSWORD: nestjs_secret
+          POSTGRES_DB: nestjs_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nestjs -d nestjs_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      # SMTP vero (Mailpit): usato dal test di integrazione dell'invio email.
+      mailpit:
+        image: axllent/mailpit:v1.21
+        ports:
+          - 1025:1025
+          - 8025:8025
+    env:
+      E2E_DATABASE_URL: postgresql://nestjs:nestjs_secret@localhost:5432/nestjs_e2e
+      E2E_SMTP_HOST: localhost
+      E2E_SMTP_PORT: '1025'
+      E2E_MAILPIT_API: http://localhost:8025
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: E2E tests (PostgreSQL reale)
+        run: yarn test:e2e:db

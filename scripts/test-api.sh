@@ -13,6 +13,8 @@
 set -euo pipefail
 
 BASE_URL="${1:-http://localhost:5000}"
+# Le email di sviluppo finiscono in Mailpit: da li' si legge il token di verifica.
+MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
 COOKIE_JAR="$(mktemp /tmp/nestjs-cookies.XXXXXX)"
 PASS=0
 FAIL=0
@@ -50,6 +52,16 @@ DEL()  { curl -s -o /tmp/_body -w "%{http_code}" -b "$COOKIE_JAR" -c "$COOKIE_JA
               -X DELETE "$BASE_URL$1"; }
 BODY() { cat /tmp/_body; }
 
+# Legge da Mailpit il token di verifica inviato a $1 e lo conferma via API.
+verify_email() {
+  local email="$1" id token
+  id=$(curl -s "$MAILPIT_URL/api/v1/search?query=to:$email" | jq -r '.messages[0].ID // empty')
+  [[ -n "$id" ]] || { echo ""; return 1; }
+  token=$(curl -s "$MAILPIT_URL/api/v1/message/$id" | jq -r '.Text' | grep -o 'token=[^[:space:]]*' | head -1 | cut -d= -f2)
+  [[ -n "$token" ]] || { echo ""; return 1; }
+  POST "/api/auth/verify-email" "{\"token\":\"$token\",\"password\":\"$TEST_PASS\"}"
+}
+
 # =============================================================================
 echo ""
 info "Target: $BASE_URL"
@@ -70,11 +82,14 @@ TEST_EMAIL="testuser_$$@example.com"
 TEST_PASS="SecurePass123!"
 
 STATUS=$(POST "/api/auth/register" "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}")
-assert_status "POST /api/auth/register (new user)" "201" "$STATUS"
-assert_field  "Register → message" ".message" "User registered successfully" "$(BODY)"
+assert_status "POST /api/auth/register (new user) → 202" "202" "$STATUS"
+NEW_BODY="$(BODY)"
 
+# Risposta uniforme: un indirizzo gia' registrato non si distingue da uno nuovo.
 STATUS=$(POST "/api/auth/register" "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}")
-assert_status "POST /api/auth/register (duplicate) → 400" "400" "$STATUS"
+assert_status "POST /api/auth/register (duplicate) → 202, same as new" "202" "$STATUS"
+if [[ "$(BODY)" == "$NEW_BODY" ]]; then ok "Register: identical body for new and existing address";
+else fail "Register: body differs between new and existing address"; fi
 
 STATUS=$(POST "/api/auth/register" "{\"email\":\"not-an-email\",\"password\":\"pass\"}")
 assert_status "POST /api/auth/register (invalid email) → 400" "400" "$STATUS"
@@ -82,6 +97,12 @@ assert_status "POST /api/auth/register (invalid email) → 400" "400" "$STATUS"
 # ── 3. AUTH — login ───────────────────────────────────────────────────────────
 echo ""
 info "--- Auth: Login ---"
+
+STATUS=$(POST "/api/auth/login" "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}")
+assert_status "POST /api/auth/login (email not verified yet) → 403" "403" "$STATUS"
+
+STATUS=$(verify_email "$TEST_EMAIL" || true)
+assert_status "POST /api/auth/verify-email (token read from Mailpit)" "200" "${STATUS:-no-email}"
 
 STATUS=$(POST "/api/auth/login" "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}")
 assert_status "POST /api/auth/login (valid)" "200" "$STATUS"

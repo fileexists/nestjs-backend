@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../../src/modules/user/user.service';
 import { PermissionService } from '../../src/modules/permission/permission.service';
@@ -9,6 +10,7 @@ export class UserSeeder {
   constructor(
     private readonly userService: UserService,
     private readonly permissionService: PermissionService,
+    private readonly configService: ConfigService,
   ) {}
 
   async seedUser(argv: { email: string; password: string; permission: string }): Promise<void> {
@@ -31,7 +33,10 @@ export class UserSeeder {
       throw new BadRequestException('User already registered');
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(
+      password,
+      Number(this.configService.get<number>('BCRYPT_ROUNDS') ?? 12),
+    );
     const validPermissions = permissionEntities.filter((p): p is Permission => p !== null);
 
     const newUser = await this.userService.createUser({
@@ -39,6 +44,8 @@ export class UserSeeder {
       password: hashedPassword,
       permissions: validPermissions,
       provider: 'local',
+      // Creato da un operatore (non auto-registrato): l'email e' considerata verificata.
+      emailVerifiedAt: new Date(),
     });
 
     console.log(`User created: ${email} (ID: ${newUser.id})`);
@@ -70,6 +77,7 @@ export class UserSeeder {
       email,
       permissions: validPermissions,
       provider: 'google',
+      emailVerifiedAt: new Date(),
     });
 
     console.log(`Google user created: ${email} (ID: ${newUser.id})`);

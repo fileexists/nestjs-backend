@@ -6,12 +6,15 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { MaxBytes } from './max-bytes.decorator';
+import { NormalizeEmail } from './normalize-email.decorator';
 
 export class UserAuthDTO {
   @ApiProperty({
     example: 'user@example.com',
     description: 'Email address of the user',
   })
+  @NormalizeEmail()
   @IsEmail()
   email: string;
 
@@ -37,6 +40,7 @@ export class RegisterUserDTO {
     example: 'user@example.com',
     description: 'Email address of the user',
   })
+  @NormalizeEmail()
   @IsEmail()
   email: string;
 
@@ -47,5 +51,6 @@ export class RegisterUserDTO {
   @IsString()
   @MinLength(8)
   @MaxLength(72)
+  @MaxBytes(72)
   password: string;
 }

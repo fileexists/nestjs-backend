@@ -16,34 +16,35 @@
 							"type": "noauth"
 						},
 						"method": "POST",
-						"header": [],
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
 						"body": {
-							"mode": "urlencoded",
-							"urlencoded": [
-								{
-									"key": "email",
-									"value": "admin@example.com",
-									"type": "text"
-								},
-								{
-									"key": "password",
-									"value": "mySecurePassword",
-									"type": "text"
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"mySecurePassword\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
 								}
-							]
+							}
 						},
 						"url": {
-							"raw": "http://localhost:5000/auth/register",
+							"raw": "http://localhost:5000/api/auth/register",
 							"protocol": "http",
 							"host": [
 								"localhost"
 							],
 							"port": "5000",
 							"path": [
+								"api",
 								"auth",
 								"register"
 							]
-						}
+						},
+						"description": "Risponde sempre 202 con lo stesso corpo, anche se l'indirizzo e' gia' registrato. In sviluppo l'email di verifica arriva su Mailpit: http://localhost:8025"
 					},
 					"response": []
 				},
@@ -54,30 +55,30 @@
 							"type": "noauth"
 						},
 						"method": "POST",
-						"header": [],
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
 						"body": {
-							"mode": "urlencoded",
-							"urlencoded": [
-								{
-									"key": "email",
-									"value": "admin@example.com",
-									"type": "text"
-								},
-								{
-									"key": "password",
-									"value": "mySecurePassword",
-									"type": "text"
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"mySecurePassword\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
 								}
-							]
+							}
 						},
 						"url": {
-							"raw": "http://localhost:5000/auth/login",
+							"raw": "http://localhost:5000/api/auth/login",
 							"protocol": "http",
 							"host": [
 								"localhost"
 							],
 							"port": "5000",
 							"path": [
+								"api",
 								"auth",
 								"login"
 							]
@@ -94,19 +95,210 @@
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "http://localhost:5000/auth/logout",
+							"raw": "http://localhost:5000/api/auth/logout",
 							"protocol": "http",
 							"host": [
 								"localhost"
 							],
 							"port": "5000",
 							"path": [
+								"api",
 								"auth",
 								"logout"
 							]
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Verify email",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"<token ricevuto via email>\",\n  \"password\": \"MyStrongPassword123!\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:5000/api/auth/verify-email",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "5000",
+							"path": [
+								"api",
+								"auth",
+								"verify-email"
+							]
+						},
+						"description": "Conferma l'indirizzo email con il token del link e sceglie la password dell'account (sostituisce quella della registrazione). Monouso, con scadenza."
+					}
+				},
+				{
+					"name": "Resend verification",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:5000/api/auth/resend-verification",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "5000",
+							"path": [
+								"api",
+								"auth",
+								"resend-verification"
+							]
+						},
+						"description": "Risponde sempre 202. Invia una nuova email solo se l'account esiste e non e' verificato."
+					}
+				},
+				{
+					"name": "Forgot password",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:5000/api/auth/forgot-password",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "5000",
+							"path": [
+								"api",
+								"auth",
+								"forgot-password"
+							]
+						},
+						"description": "Risponde sempre 202. Se l'account esiste invia il link di reset (vale 1 ora)."
+					}
+				},
+				{
+					"name": "Reset password",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"<token ricevuto via email>\",\n  \"password\": \"myNewSecurePassword\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:5000/api/auth/reset-password",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "5000",
+							"path": [
+								"api",
+								"auth",
+								"reset-password"
+							]
+						},
+						"description": "Imposta la nuova password e revoca TUTTE le sessioni."
+					}
+				},
+				{
+					"name": "Refresh token",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:5000/api/auth/refresh",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "5000",
+							"path": [
+								"api",
+								"auth",
+								"refresh"
+							]
+						},
+						"description": "Ruota il refresh token (cookie refresh_token, inviato solo a /api/auth). Un token gia' usato revoca la sessione."
+					}
 				}
 			]
 		},
@@ -122,13 +314,14 @@
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "http://localhost:5000/permission/",
+							"raw": "http://localhost:5000/api/permission/",
 							"protocol": "http",
 							"host": [
 								"localhost"
 							],
 							"port": "5000",
 							"path": [
+								"api",
 								"permission",
 								""
 							]
@@ -154,13 +347,14 @@
 							}
 						},
 						"url": {
-							"raw": "http://localhost:5000/permission/",
+							"raw": "http://localhost:5000/api/permission/",
 							"protocol": "http",
 							"host": [
 								"localhost"
 							],
 							"port": "5000",
 							"path": [
+								"api",
 								"permission",
 								""
 							]
@@ -186,13 +380,14 @@
 							}
 						},
 						"url": {
-							"raw": "http://localhost:5000/permission/<id of the permission>",
+							"raw": "http://localhost:5000/api/permission/<id of the permission>",
 							"protocol": "http",
 							"host": [
 								"localhost"
 							],
 							"port": "5000",
 							"path": [
+								"api",
 								"permission",
 								"<id of the permission>"
 							]
@@ -209,13 +404,14 @@
 						"method": "DELETE",
 						"header": [],
 						"url": {
-							"raw": "http://localhost:5000/permission/<id of the permission>",
+							"raw": "http://localhost:5000/api/permission/<id of the permission>",
 							"protocol": "http",
 							"host": [
 								"localhost"
 							],
 							"port": "5000",
 							"path": [
+								"api",
 								"permission",
 								"<id of the permission>"
 							]
@@ -234,13 +430,14 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "http://localhost:5000/user/me",
+					"raw": "http://localhost:5000/api/user/me",
 					"protocol": "http",
 					"host": [
 						"localhost"
 					],
 					"port": "5000",
 					"path": [
+						"api",
 						"user",
 						"me"
 					]

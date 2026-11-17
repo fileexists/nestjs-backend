@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { UserService } from './user.service';
 import { User } from '../../common/entities/user.entity';
@@ -87,6 +87,105 @@ describe('UserService', () => {
       await expect(
         service.createUser({ email: 'fail@example.com' }),
       ).rejects.toThrow('DB connection lost');
+    });
+  });
+
+  describe('resetPassword (E)', () => {
+    it('un solo UPDATE: nuova password, email verificata, sessioni invalidate, google -> combined', async () => {
+      mockUserRepository.update.mockResolvedValue({ affected: 1 });
+
+      await service.resetPassword('uuid-1234', '$2b$12$newhash');
+
+      expect(mockUserRepository.update).toHaveBeenCalledTimes(1);
+      const [id, set] = mockUserRepository.update.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(id).toBe('uuid-1234');
+      expect(set.password).toBe('$2b$12$newhash');
+      expect((set.tokenVersion as () => string)()).toBe('"tokenVersion" + 1');
+      expect((set.emailVerifiedAt as () => string)()).toContain(
+        'COALESCE("emailVerifiedAt", now())',
+      );
+      expect((set.provider as () => string)()).toContain(
+        "WHEN \"provider\" = 'google' THEN 'combined'",
+      );
+    });
+  });
+
+  describe('violazione di unicita (D4)', () => {
+    it.each([{ code: '23505' }, { driverError: { code: '23505' } }])(
+      'createUser traduce %j in 409 Conflict (mai 500)',
+      async (error) => {
+        mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
+        mockUserRepository.save.mockRejectedValue(error);
+
+        await expect(
+          service.createUser({ email: 'dup@example.com' }),
+        ).rejects.toBeInstanceOf(ConflictException);
+      },
+    );
+
+    it('createUser lascia passare gli altri errori', async () => {
+      mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
+      mockUserRepository.save.mockRejectedValue(new Error('connection lost'));
+
+      await expect(
+        service.createUser({ email: 'a@example.com' }),
+      ).rejects.toThrow('connection lost');
+    });
+  });
+
+  describe('normalizzazione email (B2)', () => {
+    it('getUserByEmail cerca sempre con l email normalizzata', async () => {
+      mockUserRepository.findOne.mockResolvedValue(null);
+
+      await service.getUserByEmail('  Mario.Rossi@Example.COM ');
+
+      expect(mockUserRepository.findOne).toHaveBeenCalledWith({
+        where: { email: 'mario.rossi@example.com' },
+        relations: { permissions: true },
+      });
+    });
+
+    it('createUser salva l email normalizzata', async () => {
+      mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
+      mockUserRepository.save.mockImplementation((u: User) =>
+        Promise.resolve(u),
+      );
+
+      await service.createUser({
+        email: ' Mario@Example.com ',
+        provider: 'local',
+      });
+
+      expect(mockUserRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'mario@example.com' }),
+      );
+    });
+
+    it('createUser senza email non la inventa', async () => {
+      mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
+      mockUserRepository.save.mockImplementation((u: User) =>
+        Promise.resolve(u),
+      );
+
+      await service.createUser({ provider: 'local' });
+
+      expect(mockUserRepository.create).toHaveBeenCalledWith({
+        provider: 'local',
+      });
+    });
+
+    it('updateUser normalizza l email quando viene modificata', async () => {
+      mockUserRepository.update.mockResolvedValue({ affected: 1 });
+      mockUserRepository.findOne.mockResolvedValue(buildUser());
+
+      await service.updateUser('uuid-1234', { email: 'NEW@Example.com' });
+
+      expect(mockUserRepository.update).toHaveBeenCalledWith('uuid-1234', {
+        email: 'new@example.com',
+      });
     });
   });
 

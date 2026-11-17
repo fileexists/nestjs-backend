@@ -17,5 +17,37 @@ services:
       timeout: 5s
       retries: 5
 
+  # Mailpit: SMTP di sviluppo (le email non escono mai dalla macchina).
+  #   SMTP  -> localhost:1025  (dentro la rete compose: mailpit:1025)
+  #   UI    -> http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: nestjs_mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+
+  # Database usa-e-getta per gli e2e su PostgreSQL vero (profilo "test").
+  # Porta 5433 per non confliggere con il postgres di sviluppo; dati in tmpfs.
+  #   docker compose --profile test up -d postgres-test
+  postgres-test:
+    profiles: ["test"]
+    image: postgres:17-alpine
+    container_name: nestjs_postgres_test
+    environment:
+      POSTGRES_USER: nestjs
+      POSTGRES_PASSWORD: nestjs_secret
+      POSTGRES_DB: nestjs_e2e
+    ports:
+      - "127.0.0.1:${POSTGRES_TEST_PORT:-5433}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nestjs -d nestjs_e2e"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
 volumes:
   postgres_data:

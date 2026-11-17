@@ -3,9 +3,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
-import * as Joi from 'joi';
-import { User } from './common/entities/user.entity';
-import { Permission } from './common/entities/permission.entity';
+import { ScheduleModule } from '@nestjs/schedule';
+import { join } from 'path';
+import { envValidationSchema } from './config/env.validation';
+import { ENTITIES } from './common/entities';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { PermissionModule } from './modules/permission/permission.module';
@@ -17,21 +18,9 @@ import { AppController } from './app.controller';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      validationSchema: Joi.object({
-        NODE_ENV: Joi.string()
-          .valid('development', 'production', 'test')
-          .default('development'),
-        PORT: Joi.number().default(3000),
-        JWT_SECRET: Joi.string().min(16).required(),
-        REFRESH_TOKEN_SECRET: Joi.string().min(16).required(),
-        JWT_EXPIRATION: Joi.string().default('15m'),
-        REFRESH_TOKEN_EXPIRATION: Joi.string().default('7d'),
-        DATABASE_URL: Joi.string().required(),
-        CORS_ORIGIN: Joi.string().default('*'),
-        GOOGLE_CLIENT_ID: Joi.string().optional().allow(''),
-        GOOGLE_CLIENT_SECRET: Joi.string().optional().allow(''),
-        GOOGLE_CALLBACK_URL: Joi.string().optional().allow(''),
-      }),
+      // I test non devono dipendere dal .env di sviluppo (DB e segreti veri).
+      ignoreEnvFile: process.env.NODE_ENV === 'test',
+      validationSchema: envValidationSchema,
       validationOptions: {
         libraryOptions: { allowUnknown: true, abortEarly: true },
       },
@@ -42,11 +31,17 @@ import { AppController } from './app.controller';
       useFactory: (configService: ConfigService) => ({
         type: 'postgres',
         url: configService.get<string>('DATABASE_URL'),
-        entities: [User, Permission],
-        synchronize: configService.get<string>('NODE_ENV') === 'development',
+        entities: ENTITIES,
+        migrations: [
+          join(__dirname, '..', 'database', 'migrations', '*.{js,ts}'),
+        ],
+        migrationsRun: configService.get<boolean>('DB_MIGRATIONS_RUN') ?? false,
+        // Lo schema si evolve SOLO con le migrazioni (database/migrations/).
+        synchronize: false,
         logging: configService.get<string>('NODE_ENV') === 'development',
       }),
     }),
+    ScheduleModule.forRoot(),
     AuthModule,
     UserModule,
     PermissionModule,
