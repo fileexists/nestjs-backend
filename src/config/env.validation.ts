@@ -63,8 +63,20 @@ export const envValidationSchema = Joi.object({
     NODE_ENV?: string;
     FRONTEND_URL?: string;
     BCRYPT_ROUNDS?: number;
+    JWT_SECRET?: string;
+    REFRESH_TOKEN_SECRET?: string;
   }) => {
+    // Con lo stesso segreto un refresh token (7 giorni) varrebbe come access token.
+    if (env.JWT_SECRET === env.REFRESH_TOKEN_SECRET) {
+      throw new Error('JWT_SECRET and REFRESH_TOKEN_SECRET must be different');
+    }
     if (env.NODE_ENV === 'production') {
+      // I segnaposto di .env.sample non sono segreti.
+      for (const secret of [env.JWT_SECRET, env.REFRESH_TOKEN_SECRET]) {
+        if (/change-me/i.test(secret ?? '')) {
+          throw new Error('Replace the placeholder secrets from .env.sample');
+        }
+      }
       // In produzione il frontend e' sempre esplicito e solo https...
       parseFrontendUrls(env.FRONTEND_URL ?? '', { requireHttps: true });
       // ...e il costo bcrypt non puo' essere abbassato sotto 10.

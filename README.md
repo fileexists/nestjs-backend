@@ -85,7 +85,8 @@ yarn install
 
 ```bash
 cp .env.sample .env
-# Edit .env — set JWT_SECRET, REFRESH_TOKEN_SECRET, and verify DATABASE_URL
+# Edit .env — set JWT_SECRET and REFRESH_TOKEN_SECRET (different from each other; in production
+# the placeholders from .env.sample are rejected at startup), and verify DATABASE_URL
 ```
 
 ### 4. Run migrations

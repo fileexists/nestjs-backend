@@ -12,6 +12,26 @@ const validate = (
   envValidationSchema.validate({ ...BASE, ...env }, { allowUnknown: true });
 
 describe('validazione ambiente', () => {
+  it('in produzione rifiuta i segreti segnaposto di .env.sample', () => {
+    const production = {
+      NODE_ENV: 'production',
+      SMTP_HOST: 'smtp.example.com',
+      FRONTEND_URL: 'https://app.example.com',
+    };
+    expect(
+      validate({
+        ...production,
+        JWT_SECRET: 'change-me-to-a-long-random-string',
+      }).error?.message,
+    ).toMatch(/placeholder/);
+    expect(validate(production).error).toBeUndefined();
+  });
+
+  it('rifiuta lo stesso segreto per access e refresh token', () => {
+    const { error } = validate({ REFRESH_TOKEN_SECRET: BASE.JWT_SECRET });
+    expect(error?.message).toMatch(/must be different/);
+  });
+
   it('applica i default sicuri', () => {
     const { value, error } = validate({});
     expect(error).toBeUndefined();
