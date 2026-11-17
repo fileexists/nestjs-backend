@@ -45,11 +45,28 @@ export const refreshTokenRepositoryMock = (
 };
 
 /** Nessun account bloccato; i conteggi veri sono verificati in test/db/d2-login-lockout.e2e-spec.ts. */
-export const loginAttemptRepositoryMock = () => ({
-  query: jest.fn().mockResolvedValue([]),
-  delete: jest.fn().mockResolvedValue({ affected: 0 }),
-  createQueryBuilder: jest.fn(),
-});
+/**
+ * Nessun account bloccato: la transazione di `registerAttempt` vede sempre una riga
+ * "pulita". Il blocco vero e' verificato su PostgreSQL in test/db/d2-login-lockout.e2e-spec.ts.
+ */
+export const loginAttemptRepositoryMock = () => {
+  const tx = {
+    query: jest
+      .fn()
+      .mockResolvedValue([
+        { failedCount: 0, lockLevel: 0, locked: false, stale: false },
+      ]),
+  };
+  return {
+    delete: jest.fn().mockResolvedValue({ affected: 0 }),
+    createQueryBuilder: jest.fn(),
+    manager: {
+      transaction: jest.fn((work: (t: typeof tx) => Promise<unknown>) =>
+        work(tx),
+      ),
+    },
+  };
+};
 
 export const mailServiceMock = () => ({
   sendVerificationEmail: jest.fn().mockResolvedValue(undefined),

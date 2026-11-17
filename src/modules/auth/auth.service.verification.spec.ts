@@ -75,7 +75,9 @@ describe('AuthService - verifica email (A1)', () => {
     jest.resetAllMocks();
     resetAuthMocks();
     jwtService.signAsync.mockResolvedValue('signed.jwt');
-    mockLoginAttemptService.getLockedUntil.mockResolvedValue(null);
+    mockLoginAttemptService.registerAttempt.mockResolvedValue({
+      locked: false,
+    });
     userService.getUserByGoogleId.mockResolvedValue(null);
     permissionService.getRequired.mockResolvedValue({
       id: 'p1',

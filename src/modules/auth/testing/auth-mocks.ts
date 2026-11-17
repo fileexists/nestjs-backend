@@ -27,8 +27,7 @@ export const mockRefreshTokenService = {
 };
 
 export const mockLoginAttemptService = {
-  getLockedUntil: jest.fn(),
-  recordFailure: jest.fn(),
+  registerAttempt: jest.fn(),
   reset: jest.fn(),
   deleteStale: jest.fn(),
 };

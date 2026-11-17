@@ -390,7 +390,8 @@ export class AuthService {
   ): Promise<void> {
     const user = await this.userService.getUserByEmail(dto.email);
 
-    const lockedUntil = await this.loginAttemptService.getLockedUntil(
+    // Il tentativo si conta prima di controllare la password (atomico: vedi LoginAttemptService).
+    const { locked } = await this.loginAttemptService.registerAttempt(
       dto.email,
     );
     const knownDevice =
@@ -402,7 +403,7 @@ export class AuthService {
         user.tokenVersion,
       );
     // Il dispositivo gia' riconosciuto del proprietario non resta fuori per un blocco causato da altri.
-    if (lockedUntil && !knownDevice) {
+    if (locked && !knownDevice) {
       throw new HttpException(
         'Too many failed login attempts. Try again later.',
         HttpStatus.TOO_MANY_REQUESTS,
@@ -415,7 +416,6 @@ export class AuthService {
     const valid = !!user?.password && !!dto.password && matches;
 
     if (!valid) {
-      if (!lockedUntil) await this.loginAttemptService.recordFailure(dto.email);
       throw new UnauthorizedException('Invalid email or password');
     }
 

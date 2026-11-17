@@ -123,7 +123,9 @@ describe('AuthService - credenziali', () => {
     resetAuthMocks();
     jwtService.signAsync.mockResolvedValue('signed.jwt');
     permissionService.getRequired.mockResolvedValue({ id: 'p1', name: 'USER' });
-    mockLoginAttemptService.getLockedUntil.mockResolvedValue(null);
+    mockLoginAttemptService.registerAttempt.mockResolvedValue({
+      locked: false,
+    });
     service = await build();
   });
 
@@ -260,23 +262,47 @@ describe('AuthService - credenziali', () => {
     const ok = { email: 'mario@example.com', password: 'Correct-Passw0rd' };
     const bad = { email: 'mario@example.com', password: 'Wrong-Passw0rd!' };
 
-    it('registra ogni errore (anche per account inesistenti)', async () => {
+    it('conta ogni tentativo PRIMA di controllare la password (anche per account inesistenti)', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
+      const order: string[] = [];
+      mockLoginAttemptService.registerAttempt.mockImplementation(() => {
+        order.push('conteggio');
+        return Promise.resolve({ locked: false });
+      });
+      bcryptCompare.mockImplementationOnce(() => {
+        order.push('bcrypt');
+        return Promise.resolve(false);
+      });
+
       await service
         .login(bad, asResponse(buildResponse()))
         .catch(() => undefined);
-      expect(mockLoginAttemptService.recordFailure).toHaveBeenCalledWith(
+
+      expect(mockLoginAttemptService.registerAttempt).toHaveBeenCalledWith(
         'mario@example.com',
       );
+      expect(order).toEqual(['conteggio', 'bcrypt']);
     });
 
-    it("con account bloccato risponde 429 SENZA valutare la password e senza contare l'errore", async () => {
+    it('la password errata non registra un secondo errore: il tentativo e gia contato', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: hash }),
       );
-      mockLoginAttemptService.getLockedUntil.mockResolvedValue(
-        new Date(Date.now() + 60_000),
+
+      await service
+        .login(bad, asResponse(buildResponse()))
+        .catch(() => undefined);
+
+      expect(mockLoginAttemptService.registerAttempt).toHaveBeenCalledTimes(1);
+    });
+
+    it('con account bloccato risponde 429 SENZA valutare la password', async () => {
+      userService.getUserByEmail.mockResolvedValue(
+        buildUser({ password: hash }),
       );
+      mockLoginAttemptService.registerAttempt.mockResolvedValue({
+        locked: true,
+      });
 
       const error = await service
         .login(ok, asResponse(buildResponse()))
@@ -285,14 +311,13 @@ describe('AuthService - credenziali', () => {
       expect(error).toBeInstanceOf(HttpException);
       expect((error as HttpException).getStatus()).toBe(429);
       expect(bcryptCompare).not.toHaveBeenCalled();
-      expect(mockLoginAttemptService.recordFailure).not.toHaveBeenCalled();
     });
 
     it("il blocco vale anche per un'email inesistente (non rivela l'esistenza)", async () => {
       userService.getUserByEmail.mockResolvedValue(null);
-      mockLoginAttemptService.getLockedUntil.mockResolvedValue(
-        new Date(Date.now() + 60_000),
-      );
+      mockLoginAttemptService.registerAttempt.mockResolvedValue({
+        locked: true,
+      });
 
       const error = await service
         .login(ok, asResponse(buildResponse()))
@@ -313,9 +338,9 @@ describe('AuthService - credenziali', () => {
     describe('dispositivo riconosciuto', () => {
       const user = () => buildUser({ password: hash });
       const lock = () =>
-        mockLoginAttemptService.getLockedUntil.mockResolvedValue(
-          new Date(Date.now() + 60_000),
-        );
+        mockLoginAttemptService.registerAttempt.mockResolvedValue({
+          locked: true,
+        });
 
       it('il proprietario con il cookie firmato entra anche durante il blocco', async () => {
         userService.getUserByEmail.mockResolvedValue(user());
@@ -332,7 +357,7 @@ describe('AuthService - credenziali', () => {
         );
       });
 
-      it("ma la password va comunque verificata: errata -> 401 e l'errore non estende il blocco", async () => {
+      it('ma la password va comunque verificata: errata -> 401', async () => {
         userService.getUserByEmail.mockResolvedValue(user());
         lock();
         const cookie = createTrustedDeviceCookie(JWT_SECRET, 'user-1', 0);
@@ -340,7 +365,6 @@ describe('AuthService - credenziali', () => {
         await expect(
           service.login(bad, asResponse(buildResponse()), cookie),
         ).rejects.toBeInstanceOf(UnauthorizedException);
-        expect(mockLoginAttemptService.recordFailure).not.toHaveBeenCalled();
       });
 
       it.each([

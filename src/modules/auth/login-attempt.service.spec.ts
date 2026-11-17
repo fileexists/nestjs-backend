@@ -13,10 +13,15 @@ describe('LoginAttemptService (D2)', () => {
     where: jest.fn().mockReturnThis(),
     execute: jest.fn(),
   };
+  const tx = { query: jest.fn() };
   const repository = {
-    query: jest.fn(),
     delete: jest.fn(),
     createQueryBuilder: jest.fn(() => queryBuilder),
+    manager: {
+      transaction: jest.fn((work: (t: typeof tx) => Promise<unknown>) =>
+        work(tx),
+      ),
+    },
   };
   let service: LoginAttemptService;
 
@@ -45,60 +50,82 @@ describe('LoginAttemptService (D2)', () => {
     );
   });
 
-  describe('getLockedUntil', () => {
-    it('ritorna la scadenza del blocco (orologio del database) o null', async () => {
-      const until = new Date(Date.now() + 60_000);
-      repository.query
-        .mockResolvedValueOnce([{ lockedUntil: until }])
-        .mockResolvedValueOnce([]);
-
-      await expect(service.getLockedUntil('a@example.com')).resolves.toBe(
-        until,
-      );
-      await expect(service.getLockedUntil('a@example.com')).resolves.toBeNull();
-
-      const [sql, params] = repository.query.mock.calls[0] as [
-        string,
-        string[],
-      ];
-      expect(sql).toContain('"lockedUntil" > now()');
-      expect(params).toEqual([sha('a@example.com')]);
+  describe('registerAttempt', () => {
+    const row = (over: Partial<Record<string, unknown>> = {}) => ({
+      failedCount: 0,
+      lockLevel: 0,
+      locked: false,
+      stale: false,
+      ...over,
     });
-  });
+    const update = (call: number) =>
+      tx.query.mock.calls[call] as [string, unknown[]];
 
-  describe('recordFailure', () => {
-    it('sotto soglia: un solo upsert e nessun blocco', async () => {
-      repository.query.mockResolvedValueOnce([{ failedCount: 4 }]);
+    it('prima blocca la riga (upsert fittizio) in una transazione, poi aggiorna', async () => {
+      tx.query.mockResolvedValueOnce([row()]).mockResolvedValueOnce([]);
 
-      await service.recordFailure('a@example.com');
+      await expect(service.registerAttempt('a@example.com')).resolves.toEqual({
+        locked: false,
+      });
 
-      expect(repository.query).toHaveBeenCalledTimes(1);
-      const [sql, params] = repository.query.mock.calls[0] as [
-        string,
-        unknown[],
-      ];
+      expect(repository.manager.transaction).toHaveBeenCalledTimes(1);
+      const [sql, params] = update(0);
       expect(sql).toMatch(/INSERT INTO "login_attempts"/);
-      expect(sql).toMatch(/ON CONFLICT/);
+      expect(sql).toMatch(/ON CONFLICT \("identifier"\) DO UPDATE/);
       expect(params).toEqual([sha('a@example.com'), 1800]);
     });
 
-    it('alla soglia: applica il blocco con durata raddoppiata per livello e tetto massimo, in modo idempotente', async () => {
-      repository.query
-        .mockResolvedValueOnce([{ failedCount: 5 }])
+    it('sotto soglia: conta il tentativo e non blocca', async () => {
+      tx.query
+        .mockResolvedValueOnce([row({ failedCount: 2, lockLevel: 1 })])
         .mockResolvedValueOnce([]);
 
-      await service.recordFailure('a@example.com');
+      const result = await service.registerAttempt('a@example.com');
 
-      expect(repository.query).toHaveBeenCalledTimes(2);
-      const [sql, params] = repository.query.mock.calls[1] as [
-        string,
-        unknown[],
-      ];
-      expect(sql).toContain('power(2, "lockLevel")');
+      expect(result).toEqual({ locked: false });
+      expect(tx.query).toHaveBeenCalledTimes(2);
+      const [sql, params] = update(1);
+      expect(sql).not.toContain('"lockedUntil"');
+      expect(params).toEqual([sha('a@example.com'), 3, 1]);
+    });
+
+    it('il tentativo che raggiunge la soglia fa scattare il blocco, ma passa (la password si verifica)', async () => {
+      tx.query
+        .mockResolvedValueOnce([row({ failedCount: 4, lockLevel: 2 })])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.registerAttempt('a@example.com');
+
+      expect(result).toEqual({ locked: false });
+      const [sql, params] = update(1);
+      expect(sql).toContain('power(2, $4::int)');
       expect(sql).toContain('LEAST(');
       expect(sql).toContain('"failedCount" = 0');
-      expect(sql).toMatch(/WHERE "identifier" = \$1 AND "failedCount" >= \$4/); // scatta una volta sola
-      expect(params).toEqual([sha('a@example.com'), 900, 60, 5]);
+      // durata = min(tetto, base * 2^livello); il livello cresce di uno
+      expect(params).toEqual([sha('a@example.com'), 900, 60, 2]);
+    });
+
+    it('account gia bloccato: lo dice senza contare nulla (non prolunga il blocco)', async () => {
+      tx.query.mockResolvedValueOnce([row({ failedCount: 0, locked: true })]);
+
+      await expect(service.registerAttempt('a@example.com')).resolves.toEqual({
+        locked: true,
+      });
+
+      expect(tx.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('fuori finestra riparte da zero: contatore e livello azzerati', async () => {
+      tx.query
+        .mockResolvedValueOnce([
+          row({ failedCount: 4, lockLevel: 3, stale: true }),
+        ])
+        .mockResolvedValueOnce([]);
+
+      await service.registerAttempt('a@example.com');
+
+      const [, params] = update(1);
+      expect(params).toEqual([sha('a@example.com'), 1, 0]);
     });
 
     it('i parametri sono configurabili', async () => {
@@ -108,31 +135,22 @@ describe('LoginAttemptService (D2)', () => {
         LOGIN_LOCK_MAX_SECONDS: 100,
         LOGIN_ATTEMPT_WINDOW_SECONDS: 600,
       });
-      repository.query
-        .mockResolvedValueOnce([{ failedCount: 3 }])
+      tx.query
+        .mockResolvedValueOnce([row({ failedCount: 2 })])
         .mockResolvedValueOnce([]);
 
-      await custom.recordFailure('a@example.com');
+      await custom.registerAttempt('a@example.com');
 
-      expect((repository.query.mock.calls[0] as unknown[][])[1]).toEqual([
-        sha('a@example.com'),
-        600,
-      ]);
-      expect((repository.query.mock.calls[1] as unknown[][])[1]).toEqual([
-        sha('a@example.com'),
-        100,
-        10,
-        3,
-      ]);
+      expect(update(0)[1]).toEqual([sha('a@example.com'), 600]);
+      expect(update(1)[1]).toEqual([sha('a@example.com'), 100, 10, 0]);
     });
 
-    it("la finestra azzera contatore e livello se l'ultimo errore e vecchio", async () => {
-      repository.query.mockResolvedValueOnce([{ failedCount: 1 }]);
-      await service.recordFailure('a@example.com');
-      const [sql] = repository.query.mock.calls[0] as [string];
-      expect(sql).toMatch(/"lastFailedAt" < now\(\) - make_interval/);
-      expect(sql).toMatch(/THEN 1 ELSE/);
-      expect(sql).toMatch(/THEN 0 ELSE/);
+    it('un errore del database si propaga (nessun tentativo passa in silenzio)', async () => {
+      tx.query.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(service.registerAttempt('a@example.com')).rejects.toThrow(
+        'db down',
+      );
     });
   });
 

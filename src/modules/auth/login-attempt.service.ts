@@ -11,9 +11,11 @@ import { normalizeEmail } from '../../common/utils/email';
  *
  * - dopo `maxFailed` errori consecutivi l'account si blocca per `base` secondi; ogni
  *   blocco successivo raddoppia, fino a `max` (default 5 errori, 60 s -> 900 s);
+ * - il tentativo si conta PRIMA di verificare la password, in modo atomico (riga bloccata): con
+ *   richieste parallele passano al massimo `maxFailed` tentativi, non uno per richiesta;
  * - durante il blocco i tentativi NON vengono valutati ne' contati: non lo prolungano;
  * - dopo un blocco servono altri `maxFailed` errori per il successivo (non basta 1);
- * - i contatori decadono dopo `window` secondi senza errori; un login riuscito li azzera;
+ * - i contatori decadono dopo `window` secondi senza tentativi; un login riuscito li azzera;
  * - la chiave e' l'hash dell'email: stesso comportamento per account inesistenti.
  * Il proprietario non puo' essere escluso all'infinito: vedi trusted-device.ts e il reset password.
  */
@@ -47,43 +49,58 @@ export class LoginAttemptService {
     return createHash('sha256').update(normalizeEmail(email)).digest('hex');
   }
 
-  /** Fino a quando l'account e' bloccato, o null se non lo e' (orologio del database). */
-  async getLockedUntil(email: string): Promise<Date | null> {
-    const rows = await this.repository.query<{ lockedUntil: Date }[]>(
-      `SELECT "lockedUntil" FROM "login_attempts"
-        WHERE "identifier" = $1 AND "lockedUntil" > now()`,
-      [LoginAttemptService.identifierFor(email)],
-    );
-    return rows[0]?.lockedUntil ?? null;
-  }
-
-  /** Registra un errore (un solo upsert atomico) e, raggiunta la soglia, applica il blocco. */
-  async recordFailure(email: string): Promise<void> {
+  /**
+   * Conta un tentativo di login PRIMA di controllare la password e dice se l'account e' bloccato.
+   * Tutto avviene con la riga dell'account bloccata (transazione): richieste concorrenti si
+   * mettono in fila, quindi non si possono fare piu' prove del consentito. Il tentativo che
+   * raggiunge la soglia fa scattare il blocco subito, e un login riuscito lo cancella (reset).
+   * Se l'account e' gia' bloccato non conta nulla: i tentativi durante il blocco non lo prolungano.
+   */
+  async registerAttempt(email: string): Promise<{ locked: boolean }> {
     const identifier = LoginAttemptService.identifierFor(email);
-    const rows = await this.repository.query<{ failedCount: number }[]>(
-      `INSERT INTO "login_attempts" ("identifier", "failedCount", "lockLevel", "lastFailedAt")
-       VALUES ($1, 1, 0, now())
-       ON CONFLICT ("identifier") DO UPDATE SET
-         "failedCount" = CASE WHEN "login_attempts"."lastFailedAt" < now() - make_interval(secs => $2::double precision)
-                              THEN 1 ELSE "login_attempts"."failedCount" + 1 END,
-         "lockLevel"   = CASE WHEN "login_attempts"."lastFailedAt" < now() - make_interval(secs => $2::double precision)
-                              THEN 0 ELSE "login_attempts"."lockLevel" END,
-         "lastFailedAt" = now()
-       RETURNING "failedCount"`,
-      [identifier, this.windowSeconds],
-    );
-    if ((rows[0]?.failedCount ?? 0) < this.maxFailed) return;
+    return this.repository.manager.transaction(async (tx) => {
+      // Il finto DO UPDATE serve a bloccare la riga (anche appena creata) fino al commit.
+      const [row] = await tx.query<
+        {
+          failedCount: number;
+          lockLevel: number;
+          locked: boolean;
+          stale: boolean;
+        }[]
+      >(
+        `INSERT INTO "login_attempts" ("identifier") VALUES ($1)
+         ON CONFLICT ("identifier") DO UPDATE SET "identifier" = EXCLUDED."identifier"
+         RETURNING "failedCount", "lockLevel",
+                   COALESCE("lockedUntil" > now(), false) AS "locked",
+                   ("lastFailedAt" < now() - make_interval(secs => $2::double precision)) AS "stale"`,
+        [identifier, this.windowSeconds],
+      );
+      if (row.locked) return { locked: true };
 
-    // Il WHERE rende l'operazione idempotente con richieste concorrenti: scatta una volta sola.
-    await this.repository.query(
-      `UPDATE "login_attempts"
-          SET "lockedUntil" = now() + make_interval(secs =>
-                LEAST($2::double precision, $3::double precision * power(2, "lockLevel"))),
-              "lockLevel" = LEAST("lockLevel" + 1, 30),
-              "failedCount" = 0
-        WHERE "identifier" = $1 AND "failedCount" >= $4`,
-      [identifier, this.maxLockSeconds, this.baseLockSeconds, this.maxFailed],
-    );
+      // Fuori finestra (nessun tentativo da troppo tempo) si riparte da zero.
+      const level = row.stale ? 0 : row.lockLevel;
+      const count = (row.stale ? 0 : row.failedCount) + 1;
+
+      if (count >= this.maxFailed) {
+        await tx.query(
+          `UPDATE "login_attempts"
+              SET "lockedUntil" = now() + make_interval(secs => LEAST($2::double precision, $3::double precision * power(2, $4::int))),
+                  "lockLevel" = LEAST($4::int + 1, 30),
+                  "failedCount" = 0,
+                  "lastFailedAt" = now()
+            WHERE "identifier" = $1`,
+          [identifier, this.maxLockSeconds, this.baseLockSeconds, level],
+        );
+      } else {
+        await tx.query(
+          `UPDATE "login_attempts"
+              SET "failedCount" = $2, "lockLevel" = $3, "lastFailedAt" = now()
+            WHERE "identifier" = $1`,
+          [identifier, count, level],
+        );
+      }
+      return { locked: false };
+    });
   }
 
   /** Login riuscito o password reimpostata: si riparte da zero. */

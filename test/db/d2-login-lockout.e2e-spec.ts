@@ -222,6 +222,27 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     });
   });
 
+  it('con richieste parallele passano al massimo 5 tentativi: gli altri sono bloccati senza controllare la password', async () => {
+    const results = await Promise.all(
+      Array.from({ length: 30 }, () => login(h, EMAIL, WRONG)),
+    );
+
+    const checked = results.filter((r) => r.status === 401).length;
+    const blocked = results.filter((r) => r.status === 429).length;
+    expect(checked).toBe(5);
+    expect(blocked).toBe(25);
+  });
+
+  it('la password giusta non e un tentativo in piu: con 4 errori in corso, un login riuscito azzera tutto anche in parallelo agli errori', async () => {
+    await Promise.all([
+      login(h, EMAIL, WRONG),
+      login(h, EMAIL, WRONG),
+      login(h, EMAIL, WRONG),
+    ]);
+    expect((await login(h, EMAIL)).status).toBe(200);
+    expect(await attempts()).toHaveLength(0);
+  });
+
   it('richieste parallele di password errate non fanno saltare nulla e il blocco scatta', async () => {
     const results = await Promise.all(
       Array.from({ length: 10 }, () => login(h, EMAIL, WRONG)),
