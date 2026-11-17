@@ -47,7 +47,7 @@ describe('PermissionService', () => {
   });
 
   describe('findPermission', () => {
-    it('should return a permission matching the given filter', async () => {
+    it('cerca per filtro senza caricare gli utenti collegati', async () => {
       const permission = buildPermission();
       mockPermissionRepository.findOne.mockResolvedValue(permission);
 
@@ -55,30 +55,16 @@ describe('PermissionService', () => {
 
       expect(mockPermissionRepository.findOne).toHaveBeenCalledWith({
         where: { name: 'USER' },
-        relations: { users: true },
       });
       expect(result).toEqual(permission);
     });
 
-    it('should return null when no permission matches the filter', async () => {
+    it('ritorna null se nessun permesso corrisponde', async () => {
       mockPermissionRepository.findOne.mockResolvedValue(null);
 
-      const result = await service.findPermission({ name: 'NONEXISTENT' });
-
-      expect(result).toBeNull();
-    });
-
-    it('should query by id when the filter contains an id', async () => {
-      const permission = buildPermission({ id: 'specific-uuid' });
-      mockPermissionRepository.findOne.mockResolvedValue(permission);
-
-      const result = await service.findPermission({ id: 'specific-uuid' });
-
-      expect(mockPermissionRepository.findOne).toHaveBeenCalledWith({
-        where: { id: 'specific-uuid' },
-        relations: { users: true },
-      });
-      expect(result).toEqual(permission);
+      await expect(
+        service.findPermission({ name: 'NONEXISTENT' }),
+      ).resolves.toBeNull();
     });
   });
 

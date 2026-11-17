@@ -100,7 +100,11 @@ yarn migration:generate database/migrations/<MigrationName>
 
 The schema changes **only** through `database/migrations/`. To apply them at startup instead, set `DB_MIGRATIONS_RUN=true`.
 
-> **Existing databases:** `NormalizeEmails` renames duplicate accounts (same email apart from case) and archives them in `user_email_changes`; local accounts created before `AddEmailVerification` start **unverified** and must verify their email (or reset their password) to log in with a password. Accounts created by `yarn seed` are verified.
+> **Existing databases:** `NormalizeEmails` renames duplicate accounts (same email apart from case) and archives them in `user_email_changes`; local accounts created before `AddEmailVerification` start **unverified** and must verify their email (or reset their password) to log in with a password. Accounts created by `yarn seed` are verified. An admin created before this change can log in again after "forgot password", or you can verify the account by hand:
+
+```sql
+UPDATE users SET "emailVerifiedAt" = now() WHERE email = 'admin@example.com';
+```
 
 ### 5. Seed the database
 
@@ -258,6 +262,7 @@ Rate limiting: 100 requests per 60 seconds per IP.
 - **Instant revocation:** the access token carries `tokenVersion`, checked on every request (one primary-key lookup): logout-all, reuse detection and password reset invalidate it immediately. A single-session `logout` revokes the refresh token; the access token of that session lives until it expires (≤ `JWT_EXPIRATION`).
 - **Refresh cookie path:** because it is only sent to `/api/auth/*`, clients renew with `POST /api/auth/refresh` (or `GET /api/auth/validate`), not through other routes. If a proxy changes the public path, rewrite the cookie path (`proxy_cookie_path /api/auth <public path>/auth;`).
 - `trusted_device` only lets the account owner log in (still with the right password) while the account is temporarily locked by someone else's failed attempts; it never skips the password check and is tied to the account and its `tokenVersion`.
+- Known limit: whoever knows an email can keep that account locked for new devices (up to `LOGIN_LOCK_MAX_SECONDS`) by sending wrong passwords; known devices, the password reset and the per-IP limit on `/auth/login` (5 per minute) soften it. A CAPTCHA would be the next step.
 - Cookies get the `secure` flag automatically when `NODE_ENV=production`. Expired tokens are cleaned up daily.
 
 ---
@@ -273,7 +278,7 @@ See [`.env.sample`](.env.sample) for every variable. The ones introduced with th
 | `EMAIL_VERIFICATION_TTL` / `PASSWORD_RESET_TTL` | `24h` / `1h` | Lifetime of the emailed links |
 | `BCRYPT_ROUNDS` | `12` | bcrypt cost (≥ 10 in production) |
 | `LOGIN_MAX_FAILED_ATTEMPTS`, `LOGIN_LOCK_BASE_SECONDS`, `LOGIN_LOCK_MAX_SECONDS`, `LOGIN_ATTEMPT_WINDOW_SECONDS` | `5`, `60`, `900`, `1800` | Progressive per-account lockout |
-| `REFRESH_REUSE_GRACE_SECONDS` | `0` | Tolerance for parallel refreshes with the same token |
+| `REFRESH_REUSE_GRACE_SECONDS` | `10` | A refresh token used twice within this many seconds is just rejected (parallel requests); later, it counts as theft and revokes the session family. `0` = always theft |
 | `DB_MIGRATIONS_RUN` | `false` | Apply migrations at startup |
 
 Without `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_CALLBACK_URL` the Google provider is **disabled** and its endpoints answer `501`.

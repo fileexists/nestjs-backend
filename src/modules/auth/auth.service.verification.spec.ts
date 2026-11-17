@@ -30,7 +30,7 @@ const userService = {
   updateUser: jest.fn(),
   claimUnverifiedForGoogle: jest.fn(),
 };
-const permissionService = { findPermission: jest.fn(), getRequired: jest.fn() };
+const permissionService = { getRequired: jest.fn() };
 const config: Record<string, string> = {
   JWT_SECRET: 'test-jwt-secret-minimum-32-chars!!',
   REFRESH_TOKEN_SECRET: 'test-refresh-secret-min-32chars!',
@@ -77,7 +77,7 @@ describe('AuthService - verifica email (A1)', () => {
     jwtService.signAsync.mockResolvedValue('signed.jwt');
     mockLoginAttemptService.getLockedUntil.mockResolvedValue(null);
     userService.getUserByGoogleId.mockResolvedValue(null);
-    permissionService.findPermission.mockResolvedValue({
+    permissionService.getRequired.mockResolvedValue({
       id: 'p1',
       name: 'USER',
     });

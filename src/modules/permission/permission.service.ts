@@ -70,10 +70,7 @@ export class PermissionService implements OnApplicationBootstrap {
   async findPermission(
     filter: Partial<Permission>,
   ): Promise<Permission | null> {
-    return this.permissionRepository.findOne({
-      where: filter,
-      relations: { users: true },
-    });
+    return this.permissionRepository.findOne({ where: filter });
   }
 
   async findAll(): Promise<Permission[]> {

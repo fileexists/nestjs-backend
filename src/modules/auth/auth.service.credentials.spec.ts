@@ -58,7 +58,7 @@ const userService = {
   updateUser: jest.fn(),
   claimUnverifiedForGoogle: jest.fn(),
 };
-const permissionService = { getRequired: jest.fn(), findPermission: jest.fn() };
+const permissionService = { getRequired: jest.fn() };
 
 function buildUser(overrides: Partial<User> = {}): User {
   return Object.assign(new User(), {
