@@ -1299,7 +1299,7 @@
     path-to-regexp "8.4.2"
     tslib "2.8.1"
 
-"@nestjs/schedule@^12":
+"@nestjs/schedule@^12.0.4":
   version "12.0.4"
   resolved "https://registry.yarnpkg.com/@nestjs/schedule/-/schedule-12.0.4.tgz#560dc4fbae928488bcb61dd0c6945506e0255591"
   integrity sha512-C797UxK2mOB8kTSwEfHmwy3Ut72qSLkS/BLFHR3jPW/NZKZkqGFpoX5Ga3QlLdeugCg6NxrXhvgOMxioHhFzXg==
@@ -1844,13 +1844,6 @@
   integrity sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==
   dependencies:
     undici-types "~8.9.0"
-
-"@types/nodemailer@^8.0.2":
-  version "8.0.2"
-  resolved "https://registry.yarnpkg.com/@types/nodemailer/-/nodemailer-8.0.2.tgz#0f57798b2753dbad314f1ad9952713a4a9954f12"
-  integrity sha512-c7M5ox8p0nEOfbJ2E9Qcmt8/QCu/VzsiAhzBiZbvky2PhKZDHpKB3sQHBM5MEZNkCfBOaS6S9//AGPRTNB7IaA==
-  dependencies:
-    "@types/node" "*"
 
 "@types/oauth@*":
   version "0.9.6"
@@ -4807,9 +4800,9 @@ jest@^30.5.2:
     jest-cli "30.5.2"
 
 joi@^18.3.0:
-  version "18.3.0"
-  resolved "https://registry.yarnpkg.com/joi/-/joi-18.3.0.tgz#c63eb2f25082fe9c443f48c2a8e5a7a11ce3a5a1"
-  integrity sha512-/RwAK4BAfzcdbdFg073tzq4/xhY6Q7lMd5AmjqTL6pu0QFJdEmtswgm8BvgwXvOKuPNYQ8XrdQrrW/gF65LiNw==
+  version "18.3.2"
+  resolved "https://registry.yarnpkg.com/joi/-/joi-18.3.2.tgz#ca16b431106d9af32a0436aff474d3992230c788"
+  integrity sha512-iUivApKYw5GpZmq2Sy6El99j7noo8QSUFZlyQtr3HCkosC/b5wKF6/Y3teiHIlaM8WI38sAT3P+51rB0lhAhJA==
   dependencies:
     "@hapi/address" "^5.1.1"
     "@hapi/formula" "^3.0.2"
@@ -5325,10 +5318,10 @@ node-releases@^2.0.27:
   resolved "https://registry.yarnpkg.com/node-releases/-/node-releases-2.0.27.tgz#eedca519205cf20f650f61d56b070db111231e4e"
   integrity sha512-nmh3lCkYZ3grZvqcCH+fjmQ7X+H0OeZgP40OierEaAptX4XofMh5kwNbWh7lBduUzCcV/8kZ+NDLCwm2iorIlA==
 
-nodemailer@^8:
-  version "8.0.11"
-  resolved "https://registry.yarnpkg.com/nodemailer/-/nodemailer-8.0.11.tgz#ce46b7c2c8bbf17b0408122fbfb4e47f4bffc688"
-  integrity sha512-nrO/pDAUKl+wXX+lx16tDLbnm0fW6sK/x8mgohaCpg+CdCEl482bD4tCuAZk2DyliruiNTIZxRCoWkDqJEnAiA==
+nodemailer@^10.6.0:
+  version "10.6.0"
+  resolved "https://registry.yarnpkg.com/nodemailer/-/nodemailer-10.6.0.tgz#641f15ef6ddba543e1a41f255b83dd45c62e072c"
+  integrity sha512-jWanL7D9GD3jvUDYKmoC5rWTiG8MnBgnN2yV68bgMKip1zUJhiSTyz7Eg+18y8sk5OvdVDzws5nZK5arSI4f5Q==
 
 normalize-path@^3.0.0:
   version "3.0.0"
