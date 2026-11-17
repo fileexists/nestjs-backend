@@ -4,7 +4,11 @@ import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 import { parseFrontendUrls } from '../../common/utils/frontend-url';
 import { parseDurationMs } from '../../common/utils/duration';
-import { MailContent, verificationEmail } from './mail.templates';
+import {
+  MailContent,
+  registrationNoticeEmail,
+  verificationEmail,
+} from './mail.templates';
 
 const DEFAULT_EMAIL_VERIFICATION_TTL = '24h';
 
@@ -52,6 +56,17 @@ export class MailService {
   async sendVerificationEmail(to: string, token: string): Promise<void> {
     const link = `${this.frontendUrl}/verify-email?token=${encodeURIComponent(token)}`;
     await this.send(to, verificationEmail(link, this.verificationTtlMs));
+  }
+
+  /** Avviso a chi possiede l'indirizzo: qualcuno ha provato a registrarlo di nuovo. */
+  async sendRegistrationNotice(to: string): Promise<void> {
+    await this.send(
+      to,
+      registrationNoticeEmail(
+        `${this.frontendUrl}/login`,
+        `${this.frontendUrl}/forgot-password`,
+      ),
+    );
   }
 
   private async send(to: string, content: MailContent): Promise<void> {

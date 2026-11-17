@@ -14,8 +14,9 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *      per un eventuale merge manuale e per il `down`.
  * 3. Crea l'indice univoco su lower(email).
  *
- * Nota: TypeORM non sa descrivere indici su espressione, quindi `migration:generate`
- * proporra' di eliminare UQ_users_email_lower e user_email_changes: va ignorato.
+ * Nota: TypeORM non sa descrivere indici su espressione ne conosce la tabella di
+ * archivio: `migration:generate` li ignora (verificato), quindi non vanno dichiarati
+ * nelle entita' e non compaiono come differenze.
  */
 export class NormalizeEmails1794874500000 implements MigrationInterface {
   name = 'NormalizeEmails1794874500000';

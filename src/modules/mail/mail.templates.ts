@@ -55,3 +55,19 @@ export function verificationEmail(link: string, ttlMs: number): MailContent {
     { label: 'Conferma email', url: link },
   );
 }
+
+export function registrationNoticeEmail(
+  loginUrl: string,
+  resetUrl: string,
+): MailContent {
+  return layout(
+    'Tentativo di registrazione con il tuo indirizzo',
+    [
+      'Ciao,',
+      'qualcuno ha provato a registrarsi con questo indirizzo email, ma esiste già un account associato.',
+      'Se sei stato tu, accedi con le tue credenziali oppure, se non ricordi la password, reimpostala. Se non sei stato tu, ignora questo messaggio: il tuo account non è stato modificato.',
+      `Reimposta la password: ${resetUrl}`,
+    ],
+    { label: 'Accedi', url: loginUrl },
+  );
+}

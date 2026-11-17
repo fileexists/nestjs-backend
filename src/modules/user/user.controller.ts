@@ -6,6 +6,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { plainToInstance } from 'class-transformer';
 import { Request } from 'express';
 import { UserService } from './user.service';
 import { UserResponseDto } from '../../common/dto/user.dto';
@@ -33,6 +34,9 @@ export class UserController {
     if (!user) {
       throw new UnauthorizedException('User is not authenticated.');
     }
-    return user;
+    // Whitelist esplicita: nessun campo interno dell'entita' (tokenVersion, password, googleId...) esce.
+    return plainToInstance(UserResponseDto, user, {
+      excludeExtraneousValues: true,
+    });
   }
 }

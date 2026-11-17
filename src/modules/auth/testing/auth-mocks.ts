@@ -2,6 +2,7 @@ import type { Provider } from '@nestjs/common';
 import { AccountService } from '../account.service';
 import { AuthTokenService } from '../auth-token.service';
 import { RefreshTokenService } from '../refresh-token.service';
+import { LoginAttemptService } from '../login-attempt.service';
 import { MailService } from '../../mail/mail.service';
 
 /**
@@ -25,12 +26,21 @@ export const mockRefreshTokenService = {
   deleteExpired: jest.fn(),
 };
 
+export const mockLoginAttemptService = {
+  getLockedUntil: jest.fn(),
+  recordFailure: jest.fn(),
+  reset: jest.fn(),
+  deleteStale: jest.fn(),
+};
+
 export const mockMailService = {
   sendVerificationEmail: jest.fn(),
+  sendRegistrationNotice: jest.fn(),
 };
 
 export const mockAccountService = {
   sendVerification: jest.fn(),
+  sendRegistrationNotice: jest.fn(),
   verifyEmail: jest.fn(),
   resendVerification: jest.fn(),
 };
@@ -39,6 +49,7 @@ export function extraAuthProviders(): Provider[] {
   return [
     { provide: AuthTokenService, useValue: mockAuthTokenService },
     { provide: RefreshTokenService, useValue: mockRefreshTokenService },
+    { provide: LoginAttemptService, useValue: mockLoginAttemptService },
     { provide: MailService, useValue: mockMailService },
     { provide: AccountService, useValue: mockAccountService },
   ];
@@ -48,6 +59,7 @@ export function resetAuthMocks(): void {
   for (const mock of [
     mockAuthTokenService,
     mockRefreshTokenService,
+    mockLoginAttemptService,
     mockMailService,
     mockAccountService,
   ]) {

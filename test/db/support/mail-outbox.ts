@@ -1,4 +1,5 @@
-export type MailKind = 'verification';
+export type MailKind =
+  'verification' | 'registration-notice' | 'password-reset';
 
 export interface SentMail {
   kind: MailKind;
@@ -15,6 +16,17 @@ export class MailOutbox {
 
   sendVerificationEmail(to: string, token: string): Promise<void> {
     this.sent.push({ kind: 'verification', to, token });
+    return Promise.resolve();
+  }
+
+  /** "Qualcuno ha provato a registrarsi con il tuo indirizzo" (registrazione di un'email gia presente). */
+  sendRegistrationNotice(to: string): Promise<void> {
+    this.sent.push({ kind: 'registration-notice', to, token: '' });
+    return Promise.resolve();
+  }
+
+  sendPasswordResetEmail(to: string, token: string): Promise<void> {
+    this.sent.push({ kind: 'password-reset', to, token });
     return Promise.resolve();
   }
 

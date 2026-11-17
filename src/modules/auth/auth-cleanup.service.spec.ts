@@ -2,10 +2,12 @@ import { Test } from '@nestjs/testing';
 import { AuthCleanupService } from './auth-cleanup.service';
 import { AuthTokenService } from './auth-token.service';
 import { RefreshTokenService } from './refresh-token.service';
+import { LoginAttemptService } from './login-attempt.service';
 
 describe('AuthCleanupService', () => {
   const refreshTokens = { deleteExpired: jest.fn() };
   const authTokens = { deleteExpired: jest.fn() };
+  const loginAttempts = { deleteStale: jest.fn() };
   let service: AuthCleanupService;
 
   beforeEach(async () => {
@@ -15,17 +17,20 @@ describe('AuthCleanupService', () => {
         AuthCleanupService,
         { provide: RefreshTokenService, useValue: refreshTokens },
         { provide: AuthTokenService, useValue: authTokens },
+        { provide: LoginAttemptService, useValue: loginAttempts },
       ],
     }).compile();
     service = module.get(AuthCleanupService);
   });
 
-  it('run: elimina i token scaduti di entrambi i tipi e ritorna i conteggi', async () => {
+  it('run: elimina token scaduti e contatori di login non piu utili e ritorna i conteggi', async () => {
     refreshTokens.deleteExpired.mockResolvedValue(3);
     authTokens.deleteExpired.mockResolvedValue(2);
+    loginAttempts.deleteStale.mockResolvedValue(5);
     await expect(service.run()).resolves.toEqual({
       refreshTokens: 3,
       authTokens: 2,
+      loginAttempts: 5,
     });
   });
 

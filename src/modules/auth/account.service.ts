@@ -9,6 +9,8 @@ import { AuthTokenService } from './auth-token.service';
 const DEFAULT_EMAIL_VERIFICATION_TTL = '24h';
 /** Tra un invio e il successivo per lo stesso account. */
 export const RESEND_COOLDOWN_MS = 60_000;
+/** Al massimo un avviso "indirizzo gia' registrato" ogni 10 minuti per la stessa casella. */
+export const NOTICE_COOLDOWN_MS = 10 * 60_000;
 
 /** Verifica dell'email e relativo reinvio. */
 @Injectable()
@@ -41,6 +43,33 @@ export class AccountService {
       this.verificationTtlMs,
     );
     this.dispatch(this.mailService.sendVerificationEmail(user.email, token));
+  }
+
+  /**
+   * Qualcuno ha provato a registrare un indirizzo che ha gia' un account: la risposta HTTP
+   * e' identica a quella di una registrazione nuova, quindi chi possiede la casella viene
+   * avvisato per email. Frequenza limitata per non poter inondare la casella di un altro.
+   */
+  async sendRegistrationNotice(user: {
+    id: string;
+    email: string;
+  }): Promise<void> {
+    const latest = await this.authTokenService.findLatestActive(
+      user.id,
+      AuthTokenType.REGISTRATION_NOTICE,
+    );
+    if (
+      latest &&
+      Date.now() - latest.createdAt.getTime() < NOTICE_COOLDOWN_MS
+    ) {
+      return;
+    }
+    await this.authTokenService.issue(
+      user.id,
+      AuthTokenType.REGISTRATION_NOTICE,
+      NOTICE_COOLDOWN_MS,
+    );
+    this.dispatch(this.mailService.sendRegistrationNotice(user.email));
   }
 
   async verifyEmail(token: string): Promise<void> {

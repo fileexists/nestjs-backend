@@ -5,6 +5,8 @@ import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthToken } from '../../common/entities/auth-token.entity';
 import { RefreshToken } from '../../common/entities/refresh-token.entity';
+import { LoginAttempt } from '../../common/entities/login-attempt.entity';
+import { LoginAttemptService } from './login-attempt.service';
 import { AuthCleanupService } from './auth-cleanup.service';
 import { RefreshTokenService } from './refresh-token.service';
 import { AccountService } from './account.service';
@@ -37,7 +39,7 @@ import type { StringValue } from 'ms';
         },
       }),
     }),
-    TypeOrmModule.forFeature([AuthToken, RefreshToken]),
+    TypeOrmModule.forFeature([AuthToken, RefreshToken, LoginAttempt]),
     MailModule,
     UserModule,
     PermissionModule,
@@ -47,6 +49,7 @@ import type { StringValue } from 'ms';
     AccountService,
     AuthTokenService,
     RefreshTokenService,
+    LoginAttemptService,
     AuthCleanupService,
     GoogleCallbackExceptionFilter,
     // Provider opzionale: senza GOOGLE_* non si registra nessuna strategia e gli

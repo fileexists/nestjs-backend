@@ -1,7 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
-import { AccountService, RESEND_COOLDOWN_MS } from './account.service';
+import {
+  AccountService,
+  NOTICE_COOLDOWN_MS,
+  RESEND_COOLDOWN_MS,
+} from './account.service';
 import { AuthTokenService } from './auth-token.service';
 import { AuthTokenType } from '../../common/entities/auth-token.entity';
 import { UserService } from '../user/user.service';
@@ -17,7 +21,10 @@ describe('AccountService (verifica email)', () => {
     consume: jest.fn(),
     findLatestActive: jest.fn(),
   };
-  const mail = { sendVerificationEmail: jest.fn() };
+  const mail = {
+    sendVerificationEmail: jest.fn(),
+    sendRegistrationNotice: jest.fn(),
+  };
   const config = {
     get: jest.fn((key: string) =>
       key === 'EMAIL_VERIFICATION_TTL' ? '2h' : undefined,
@@ -31,6 +38,7 @@ describe('AccountService (verifica email)', () => {
       key === 'EMAIL_VERIFICATION_TTL' ? '2h' : undefined,
     );
     mail.sendVerificationEmail.mockResolvedValue(undefined);
+    mail.sendRegistrationNotice.mockResolvedValue(undefined);
     authTokens.issue.mockResolvedValue('raw-token');
     const module = await Test.createTestingModule({
       providers: [
@@ -146,6 +154,54 @@ describe('AccountService (verifica email)', () => {
       });
       await service.resendVerification('a@example.com');
       expect(mail.sendVerificationEmail).toHaveBeenCalled();
+    });
+  });
+
+  describe('sendRegistrationNotice (D1)', () => {
+    const user = { id: 'u1', email: 'a@example.com' };
+
+    it("avvisa il proprietario e registra l'invio (per limitarne la frequenza)", async () => {
+      authTokens.findLatestActive.mockResolvedValue(null);
+
+      await service.sendRegistrationNotice(user);
+
+      expect(authTokens.issue).toHaveBeenCalledWith(
+        'u1',
+        AuthTokenType.REGISTRATION_NOTICE,
+        NOTICE_COOLDOWN_MS,
+      );
+      expect(mail.sendRegistrationNotice).toHaveBeenCalledWith('a@example.com');
+      expect(mail.sendVerificationEmail).not.toHaveBeenCalled();
+    });
+
+    it('non invia un secondo avviso entro il periodo di attesa (niente inondazione della casella)', async () => {
+      authTokens.findLatestActive.mockResolvedValue({
+        createdAt: new Date(Date.now() - NOTICE_COOLDOWN_MS / 2),
+      });
+
+      await service.sendRegistrationNotice(user);
+
+      expect(mail.sendRegistrationNotice).not.toHaveBeenCalled();
+      expect(authTokens.issue).not.toHaveBeenCalled();
+    });
+
+    it('dopo il periodo di attesa avvisa di nuovo', async () => {
+      authTokens.findLatestActive.mockResolvedValue({
+        createdAt: new Date(Date.now() - NOTICE_COOLDOWN_MS - 1000),
+      });
+
+      await service.sendRegistrationNotice(user);
+
+      expect(mail.sendRegistrationNotice).toHaveBeenCalled();
+    });
+
+    it('un errore SMTP non fa fallire la registrazione', async () => {
+      authTokens.findLatestActive.mockResolvedValue(null);
+      mail.sendRegistrationNotice.mockRejectedValue(new Error('smtp down'));
+
+      await expect(
+        service.sendRegistrationNotice(user),
+      ).resolves.toBeUndefined();
     });
   });
 });

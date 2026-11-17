@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { PermissionService } from './permission.service';
 import { Permission } from '../../common/entities/permission.entity';
 import {
@@ -211,6 +211,84 @@ describe('PermissionService', () => {
       await expect(service.remove('non-existent-id')).rejects.toThrow(
         'Permission not found',
       );
+    });
+  });
+
+  describe('permessi indispensabili (D5)', () => {
+    beforeEach(() => {
+      mockPermissionRepository.create.mockImplementation((d: object) => d);
+      mockPermissionRepository.save.mockImplementation((d: object) =>
+        Promise.resolve(d),
+      );
+    });
+
+    describe('ensureDefaults / onApplicationBootstrap', () => {
+      it('crea il permesso USER se manca', async () => {
+        mockPermissionRepository.findOne.mockResolvedValue(null);
+
+        await service.ensureDefaults();
+
+        expect(mockPermissionRepository.save).toHaveBeenCalledWith({
+          name: 'USER',
+          description: 'Basic user access',
+        });
+      });
+
+      it('e idempotente: se esiste non scrive nulla (descrizione modificata inclusa)', async () => {
+        mockPermissionRepository.findOne.mockResolvedValue(buildPermission());
+
+        await service.ensureDefaults();
+        await service.ensureDefaults();
+
+        expect(mockPermissionRepository.save).not.toHaveBeenCalled();
+      });
+
+      it("con piu istanze in avvio: l'unicita violata da chi arriva secondo viene ignorata", async () => {
+        mockPermissionRepository.findOne.mockResolvedValue(null);
+        mockPermissionRepository.save.mockRejectedValue({ code: '23505' });
+
+        await expect(service.ensureDefaults()).resolves.toBeUndefined();
+      });
+
+      it("un errore diverso (database giu) fa fallire l'avvio invece di essere nascosto", async () => {
+        mockPermissionRepository.findOne.mockResolvedValue(null);
+        mockPermissionRepository.save.mockRejectedValue(
+          new Error('connection refused'),
+        );
+
+        await expect(service.ensureDefaults()).rejects.toThrow(
+          'connection refused',
+        );
+      });
+
+      it("viene eseguito all'avvio dell'applicazione", async () => {
+        mockPermissionRepository.findOne.mockResolvedValue(null);
+
+        await service.onApplicationBootstrap();
+
+        expect(mockPermissionRepository.save).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('getRequired', () => {
+      it('ritorna il permesso senza caricare la relazione users (non scansiona tutti gli utenti)', async () => {
+        const permission = buildPermission();
+        mockPermissionRepository.findOne.mockResolvedValue(permission);
+
+        await expect(service.getRequired('USER')).resolves.toBe(permission);
+
+        expect(mockPermissionRepository.findOne).toHaveBeenCalledWith({
+          where: { name: 'USER' },
+        });
+      });
+
+      it('se manca risponde 503: mai un utente senza permessi in silenzio', async () => {
+        mockPermissionRepository.findOne.mockResolvedValue(null);
+
+        await expect(service.getRequired('USER')).rejects.toBeInstanceOf(
+          ServiceUnavailableException,
+        );
+      });
     });
   });
 });

@@ -12,6 +12,8 @@ import { User } from './user.entity';
 export enum AuthTokenType {
   EMAIL_VERIFICATION = 'email_verification',
   PASSWORD_RESET = 'password_reset',
+  /** Non e' un token: registra l'invio dell'avviso "registrazione su email gia' presente" per limitarne la frequenza. */
+  REGISTRATION_NOTICE = 'registration_notice',
 }
 
 /**

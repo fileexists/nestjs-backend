@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { UserService } from './user.service';
 import { User } from '../../common/entities/user.entity';
@@ -87,6 +87,29 @@ describe('UserService', () => {
       await expect(
         service.createUser({ email: 'fail@example.com' }),
       ).rejects.toThrow('DB connection lost');
+    });
+  });
+
+  describe('violazione di unicita (D4)', () => {
+    it.each([{ code: '23505' }, { driverError: { code: '23505' } }])(
+      'createUser traduce %j in 409 Conflict (mai 500)',
+      async (error) => {
+        mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
+        mockUserRepository.save.mockRejectedValue(error);
+
+        await expect(
+          service.createUser({ email: 'dup@example.com' }),
+        ).rejects.toBeInstanceOf(ConflictException);
+      },
+    );
+
+    it('createUser lascia passare gli altri errori', async () => {
+      mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
+      mockUserRepository.save.mockRejectedValue(new Error('connection lost'));
+
+      await expect(
+        service.createUser({ email: 'a@example.com' }),
+      ).rejects.toThrow('connection lost');
     });
   });
 

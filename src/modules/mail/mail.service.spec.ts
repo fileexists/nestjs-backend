@@ -80,6 +80,21 @@ describe('MailService', () => {
     expect(message.html).not.toContain('token=a b&c');
   });
 
+  it("l'avviso di registrazione contiene i link di accesso e di reset verso il frontend", async () => {
+    await build().sendRegistrationNotice('user@example.com');
+
+    const message = (sendMail.mock.calls as unknown[][])[0][0] as {
+      to: string;
+      subject: string;
+      text: string;
+    };
+    expect(message.to).toBe('user@example.com');
+    expect(message.subject).toMatch(/registrazione/i);
+    expect(message.text).toContain('https://app.example.com/login');
+    expect(message.text).toContain('https://app.example.com/forgot-password');
+    expect(message.text).not.toContain('token=');
+  });
+
   it('propaga gli errori SMTP al chiamante', async () => {
     sendMail.mockRejectedValueOnce(new Error('ECONNREFUSED'));
     await expect(

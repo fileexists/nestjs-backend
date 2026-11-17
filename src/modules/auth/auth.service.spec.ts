@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { UserService } from '../user/user.service';
@@ -602,53 +602,14 @@ describe('AuthService', () => {
       );
     });
 
-    it('both options should have path set to "/"', () => {
+    it('access token on "/", refresh token limited to /api/auth (D7)', () => {
       const { accessTokenOptions, refreshTokenOptions } =
         service.getCookieOptions();
       expect(accessTokenOptions.path).toBe('/');
-      expect(refreshTokenOptions.path).toBe('/');
+      expect(refreshTokenOptions.path).toBe('/api/auth');
     });
   });
 
-  // =========================================================================
-  // register
-  // =========================================================================
-
-  describe('register', () => {
-    it('should hash the password and create a new user, returning userId', async () => {
-      mockUserService.getUserByEmail.mockResolvedValue(null);
-      mockPermissionService.findPermission.mockResolvedValue({
-        id: 'perm-1',
-        name: 'USER',
-        description: 'Standard user',
-      });
-      const savedUser = buildUser({ id: 'new-uuid' });
-      mockUserService.createUser.mockResolvedValue(savedUser);
-
-      const result = await service.register({
-        email: 'new@example.com',
-        password: 'Pass1234!',
-      });
-
-      expect(result.message).toBe('User registered successfully');
-      expect(result.userId).toBe('new-uuid');
-      expect(mockUserService.createUser).toHaveBeenCalledWith(
-        expect.objectContaining({
-          email: 'new@example.com',
-          provider: 'local',
-        }),
-      );
-    });
-
-    it('should throw BadRequestException when the email is already registered', async () => {
-      mockUserService.getUserByEmail.mockResolvedValue(buildUser());
-
-      await expect(
-        service.register({ email: 'test@example.com', password: 'Pass1234!' }),
-      ).rejects.toThrow(BadRequestException);
-      await expect(
-        service.register({ email: 'test@example.com', password: 'Pass1234!' }),
-      ).rejects.toThrow('User already registered');
-    });
-  });
+  // register/login (risposta uniforme, blocco per account, bcrypt, re-hash) sono in
+  // auth.service.credentials.spec.ts.
 });

@@ -20,9 +20,11 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import { req } from './utils/http';
 import {
   AuthToken,
+  LoginAttempt,
   RefreshToken,
   MailService,
   authTokenRepositoryMock,
+  loginAttemptRepositoryMock,
   refreshTokenRepositoryMock,
   mailServiceMock,
 } from './utils/mocks';
@@ -67,6 +69,8 @@ describe('AppModule bootstrap (e2e)', () => {
       .useValue(authTokenRepositoryMock())
       .overrideProvider(getRepositoryToken(RefreshToken))
       .useValue(refreshTokenRepositoryMock())
+      .overrideProvider(getRepositoryToken(LoginAttempt))
+      .useValue(loginAttemptRepositoryMock())
       .overrideProvider(MailService)
       .useValue(mailServiceMock())
       .compile();

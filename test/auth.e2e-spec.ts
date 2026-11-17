@@ -37,9 +37,11 @@ import {
 import { req, ApiResponseBody } from './utils/http';
 import {
   AuthToken,
+  LoginAttempt,
   RefreshToken,
   MailService,
   authTokenRepositoryMock,
+  loginAttemptRepositoryMock,
   refreshTokenRepositoryMock,
   mailServiceMock,
 } from './utils/mocks';
@@ -211,6 +213,8 @@ async function createGoogleOverrideApp(
     .useValue(authTokenRepositoryMock())
     .overrideProvider(getRepositoryToken(RefreshToken))
     .useValue(refreshTokenRepositoryMock())
+    .overrideProvider(getRepositoryToken(LoginAttempt))
+    .useValue(loginAttemptRepositoryMock())
     .overrideProvider(MailService)
     .useValue(mailServiceMock())
     .compile();
@@ -251,6 +255,8 @@ describe('AuthController (e2e)', () => {
       .useValue(authTokenRepositoryMock())
       .overrideProvider(getRepositoryToken(RefreshToken))
       .useValue(refreshTokenRepositoryMock())
+      .overrideProvider(getRepositoryToken(LoginAttempt))
+      .useValue(loginAttemptRepositoryMock())
       .overrideProvider(MailService)
       .useValue(mailServiceMock())
       .compile();
@@ -348,23 +354,25 @@ describe('AuthController (e2e)', () => {
   // =========================================================================
 
   describe('POST /auth/register', () => {
-    it('should return 201 and the new userId when registering a brand-new email', async () => {
+    const ACCEPTED =
+      'If the address can be registered, an email with the next steps has been sent. Check your inbox.';
+
+    it('should return 202 with a uniform message (no userId) when registering a brand-new email', async () => {
       const response = await req(app)
         .post('/api/auth/register')
         .send({ email: 'newuser@example.com', password: 'StrongPass1!' })
-        .expect(201);
+        .expect(202);
       const body = response.body as ApiResponseBody;
 
-      expect(body.message).toBe('User registered successfully');
-      expect(body.userId).toBeDefined();
-      expect(typeof body.userId).toBe('string');
+      expect(body.message).toBe(ACCEPTED);
+      expect(body.userId).toBeUndefined();
     });
 
     it('should store a bcrypt-hashed password (not plain text) in the repository', async () => {
       await req(app)
         .post('/api/auth/register')
         .send({ email: 'hashed@example.com', password: 'PlainText123' })
-        .expect(201);
+        .expect(202);
 
       const savedUser = db.get('hashed@example.com')!;
       expect(savedUser.password).not.toBe('PlainText123');
@@ -375,20 +383,23 @@ describe('AuthController (e2e)', () => {
       await req(app)
         .post('/api/auth/register')
         .send({ email: 'withperm@example.com', password: 'Pass1234!' })
-        .expect(201);
+        .expect(202);
 
       const savedUser = db.get('withperm@example.com')!;
       expect(savedUser.permissions).toEqual([USER_PERMISSION]);
     });
 
-    it('should return 400 when the email is already registered', async () => {
+    it('should answer EXACTLY the same (202, same body) when the email is already registered, without touching the account', async () => {
+      const before = { ...db.get(LOCAL_USER.email)! };
+
       const response = await req(app)
         .post('/api/auth/register')
         .send({ email: LOCAL_USER.email, password: 'AnyPassword1' })
-        .expect(400);
+        .expect(202);
       const body = response.body as ApiResponseBody;
 
-      expect(body.message).toBe('User already registered');
+      expect(body.message).toBe(ACCEPTED);
+      expect(db.get(LOCAL_USER.email)!.password).toBe(before.password);
     });
   });
 
@@ -437,14 +448,15 @@ describe('AuthController (e2e)', () => {
       expect(body.message).toBe('Invalid email or password');
     });
 
-    it('should return 401 when a Google-only user tries to login with a password', async () => {
+    it('should return the SAME generic 401 when a Google-only user tries to login with a password', async () => {
       const response = await req(app)
         .post('/api/auth/login')
         .send({ email: GOOGLE_USER.email, password: 'anypassword' })
         .expect(401);
       const body = response.body as ApiResponseBody;
 
-      expect(body.message).toBe('Please login via google.');
+      // Niente piu' "Please login via google.": stessa risposta di password errata/utente inesistente.
+      expect(body.message).toBe('Invalid email or password');
     });
 
     it('should update provider to "combined" when a google user logs in with a password', async () => {

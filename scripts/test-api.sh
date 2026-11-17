@@ -82,11 +82,14 @@ TEST_EMAIL="testuser_$$@example.com"
 TEST_PASS="SecurePass123!"
 
 STATUS=$(POST "/api/auth/register" "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}")
-assert_status "POST /api/auth/register (new user)" "201" "$STATUS"
-assert_field  "Register → message" ".message" "User registered successfully" "$(BODY)"
+assert_status "POST /api/auth/register (new user) → 202" "202" "$STATUS"
+NEW_BODY="$(BODY)"
 
+# Risposta uniforme: un indirizzo gia' registrato non si distingue da uno nuovo.
 STATUS=$(POST "/api/auth/register" "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}")
-assert_status "POST /api/auth/register (duplicate) → 400" "400" "$STATUS"
+assert_status "POST /api/auth/register (duplicate) → 202, same as new" "202" "$STATUS"
+if [[ "$(BODY)" == "$NEW_BODY" ]]; then ok "Register: identical body for new and existing address";
+else fail "Register: body differs between new and existing address"; fi
 
 STATUS=$(POST "/api/auth/register" "{\"email\":\"not-an-email\",\"password\":\"pass\"}")
 assert_status "POST /api/auth/register (invalid email) → 400" "400" "$STATUS"

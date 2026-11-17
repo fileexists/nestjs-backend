@@ -17,6 +17,7 @@ import {
   extraAuthProviders,
   mockAccountService,
   mockAuthTokenService,
+  mockLoginAttemptService,
   resetAuthMocks,
 } from './testing/auth-mocks';
 
@@ -29,7 +30,7 @@ const userService = {
   updateUser: jest.fn(),
   claimUnverifiedForGoogle: jest.fn(),
 };
-const permissionService = { findPermission: jest.fn() };
+const permissionService = { findPermission: jest.fn(), getRequired: jest.fn() };
 const config: Record<string, string> = {
   JWT_SECRET: 'test-jwt-secret-minimum-32-chars!!',
   REFRESH_TOKEN_SECRET: 'test-refresh-secret-min-32chars!',
@@ -74,6 +75,7 @@ describe('AuthService - verifica email (A1)', () => {
     jest.resetAllMocks();
     resetAuthMocks();
     jwtService.signAsync.mockResolvedValue('signed.jwt');
+    mockLoginAttemptService.getLockedUntil.mockResolvedValue(null);
     userService.getUserByGoogleId.mockResolvedValue(null);
     permissionService.findPermission.mockResolvedValue({
       id: 'p1',
@@ -94,7 +96,6 @@ describe('AuthService - verifica email (A1)', () => {
 
   describe('register', () => {
     it("crea l'utente NON verificato e invia l'email di verifica", async () => {
-      permissionService.findPermission.mockResolvedValue(null);
       userService.getUserByEmail.mockResolvedValue(null);
       const created = buildUser({ id: 'new-1', email: 'new@example.com' });
       userService.createUser.mockResolvedValue(created);

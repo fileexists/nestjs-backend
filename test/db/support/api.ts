@@ -28,6 +28,19 @@ export function login(
   return client.post('/api/auth/login').send({ email, password });
 }
 
+/** Mediana di una serie di durate (ms): robusta ai picchi occasionali. */
+export function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+/** Durata (ms) di una chiamata asincrona. */
+export async function timed(fn: () => PromiseLike<unknown>): Promise<number> {
+  const start = process.hrtime.bigint();
+  await fn();
+  return Number(process.hrtime.bigint() - start) / 1e6;
+}
+
 export function verifyEmail(h: Harness, token: string) {
   return http(h).post('/api/auth/verify-email').send({ token });
 }

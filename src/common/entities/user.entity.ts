@@ -22,12 +22,14 @@ export class User {
   @Column({ type: 'varchar', length: 255, nullable: true })
   password?: string;
 
+  @Exclude()
   @Column({ type: 'varchar', length: 255, nullable: true, unique: true })
   googleId?: string;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   provider?: string;
 
+  @Exclude()
   @Column({ type: 'int', default: 0 })
   tokenVersion: number;
 

@@ -1,8 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { User } from '../../common/entities/user.entity';
 import { Permission } from '../../common/entities/permission.entity';
+import { isUniqueViolation } from '../../common/utils/db-errors';
 import { normalizeEmail } from '../../common/utils/email';
 
 export interface PaginatedUsers {
@@ -19,11 +24,19 @@ export class UserService {
     private readonly userRepository: Repository<User>,
   ) {}
 
+  /** Una violazione di unicita' (email o googleId gia' presenti, anche per corsa) diventa 409, mai 500. */
   async createUser(data: Partial<User>): Promise<User> {
     const user = this.userRepository.create(
       data.email ? { ...data, email: normalizeEmail(data.email) } : data,
     );
-    return this.userRepository.save(user);
+    try {
+      return await this.userRepository.save(user);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictException('User already exists');
+      }
+      throw error;
+    }
   }
 
   async getUserByEmail(email: string): Promise<User | null> {

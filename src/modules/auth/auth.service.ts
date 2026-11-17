@@ -1,6 +1,7 @@
 import {
-  BadRequestException,
+  ConflictException,
   ForbiddenException,
+  HttpException,
   HttpStatus,
   Injectable,
   Logger,
@@ -20,8 +21,26 @@ import { RefreshTokenService } from './refresh-token.service';
 import { parseDurationMs } from '../../common/utils/duration';
 import { GoogleAuthException } from './google-auth.exception';
 import { User } from '../../common/entities/user.entity';
-import { UserAuthDTO } from '../../common/dto/register-user.dto';
+import {
+  RegisterUserDTO,
+  UserAuthDTO,
+} from '../../common/dto/register-user.dto';
+import { GLOBAL_PREFIX } from '../../app.setup';
+import { LoginAttemptService } from './login-attempt.service';
+import {
+  createTrustedDeviceCookie,
+  TRUSTED_DEVICE_COOKIE,
+  trustedDeviceCookieOptions,
+  verifyTrustedDevice,
+} from './trusted-device';
 import { TokenPayload } from '../../common/interfaces/jwt-payload.interface';
+
+/** Percorso del cookie del refresh token: solo le rotte di autenticazione. */
+export const REFRESH_COOKIE_PATH = `/${GLOBAL_PREFIX}/auth`;
+
+/** Risposta identica per email nuova ed email gia' registrata (nessun indizio sull'esistenza dell'account). */
+export const REGISTRATION_ACCEPTED_MESSAGE =
+  'If the address can be registered, an email with the next steps has been sent. Check your inbox.';
 
 @Injectable()
 export class AuthService {
@@ -30,6 +49,10 @@ export class AuthService {
   private readonly refreshTokenSecret: string;
   private readonly jwtExpiration: string;
   private readonly refreshTokenExpiration: string;
+  /** Costo bcrypt (BCRYPT_ROUNDS, default 12). */
+  private readonly bcryptRounds: number;
+  /** Hash fittizio con lo stesso costo: per confrontare comunque una password se l'utente non esiste. */
+  private dummyHash?: Promise<string>;
   /** Tolleranza (ms) per il riuso di un refresh token appena ruotato (richieste parallele). 0 = nessuna. */
   private readonly reuseGraceMs: number;
 
@@ -41,6 +64,7 @@ export class AuthService {
     private readonly authTokenService: AuthTokenService,
     private readonly accountService: AccountService,
     private readonly refreshTokenService: RefreshTokenService,
+    private readonly loginAttemptService: LoginAttemptService,
   ) {
     const jwtSecret = this.configService.get<string>('JWT_SECRET');
     const refreshSecret = this.configService.get<string>(
@@ -58,6 +82,9 @@ export class AuthService {
       this.configService.get<string>('JWT_EXPIRATION') ?? '15m';
     this.refreshTokenExpiration =
       this.configService.get<string>('REFRESH_TOKEN_EXPIRATION') ?? '7d';
+    this.bcryptRounds = Number(
+      this.configService.get<number>('BCRYPT_ROUNDS') ?? 12,
+    );
     this.reuseGraceMs =
       Number(
         this.configService.get<number>('REFRESH_REUSE_GRACE_SECONDS') ?? 0,
@@ -65,7 +92,16 @@ export class AuthService {
   }
 
   async hashPassword(password: string): Promise<string> {
-    return bcrypt.hash(password, 10);
+    return bcrypt.hash(password, this.bcryptRounds);
+  }
+
+  /** Hash di una password casuale al costo attuale (calcolato una volta sola). */
+  private getDummyHash(): Promise<string> {
+    this.dummyHash ??= bcrypt.hash(
+      randomBytes(24).toString('base64url'),
+      this.bcryptRounds,
+    );
+    return this.dummyHash;
   }
 
   async comparePasswords(
@@ -244,6 +280,8 @@ export class AuthService {
 
   clearAuthCookies(res: Response): void {
     res.clearCookie('access_token', { path: '/' });
+    res.clearCookie('refresh_token', { path: REFRESH_COOKIE_PATH });
+    // Cookie emessi prima della restrizione di path (D7) vivono ancora su "/".
     res.clearCookie('refresh_token', { path: '/' });
   }
 
@@ -268,47 +306,89 @@ export class AuthService {
       },
       refreshTokenOptions: {
         ...base,
+        // Il browser lo invia solo alle rotte /api/auth (refresh, logout), non a ogni API.
+        path: REFRESH_COOKIE_PATH,
         maxAge: parseDurationMs(this.refreshTokenExpiration),
       },
     };
   }
 
-  async register(
-    dto: UserAuthDTO,
-  ): Promise<{ message: string; userId: string }> {
+  /**
+   * Registrazione con risposta UNIFORME (202) per email nuova e gia' registrata: non rivela
+   * se un indirizzo ha un account. Per rendere uguali anche i tempi, l'hash bcrypt si calcola
+   * sempre. Chi possiede un indirizzo gia' registrato riceve un avviso via email; chi perde una
+   * corsa di registrazioni concorrenti (violazione di unicita') viene trattato allo stesso modo.
+   * Non si modifica MAI un account esistente (nemmeno la password).
+   */
+  async register(dto: RegisterUserDTO): Promise<{ message: string }> {
+    // Se il permesso USER manca si risponde 503 PRIMA di qualsiasi altra cosa: nessun utente senza permessi.
+    const userRole = await this.permissionService.getRequired('USER');
+    const hashedPassword = await this.hashPassword(dto.password);
+
     const existing = await this.userService.getUserByEmail(dto.email);
-    if (existing) throw new BadRequestException('User already registered');
-
-    const hashedPassword = await this.hashPassword(dto.password ?? '');
-    const userRole = await this.permissionService.findPermission({
-      name: 'USER',
-    });
-    const user = await this.userService.createUser({
-      email: dto.email,
-      password: hashedPassword,
-      permissions: userRole ? [userRole] : [],
-      provider: 'local',
-    });
-
-    await this.accountService.sendVerification(user);
-
-    return { message: 'User registered successfully', userId: user.id };
-  }
-
-  async login(dto: UserAuthDTO, res: Response): Promise<void> {
-    const user = await this.userService.getUserByEmail(dto.email);
-    if (!user) throw new UnauthorizedException('Invalid email or password');
-
-    if (!user.password && user.provider === 'google') {
-      throw new UnauthorizedException('Please login via google.');
+    if (existing) {
+      await this.accountService.sendRegistrationNotice(existing);
+      return { message: REGISTRATION_ACCEPTED_MESSAGE };
     }
 
-    if (!dto.password || !user.password) {
+    try {
+      const user = await this.userService.createUser({
+        email: dto.email,
+        password: hashedPassword,
+        permissions: [userRole],
+        provider: 'local',
+      });
+      await this.accountService.sendVerification(user);
+    } catch (error) {
+      if (!(error instanceof ConflictException)) throw error;
+      const winner = await this.userService.getUserByEmail(dto.email);
+      if (winner) await this.accountService.sendRegistrationNotice(winner);
+    }
+    return { message: REGISTRATION_ACCEPTED_MESSAGE };
+  }
+
+  /**
+   * Login con password. Contro l'enumerazione degli account: la password si confronta SEMPRE
+   * con bcrypt (con un hash fittizio se l'utente non esiste o non ha password) e "utente
+   * inesistente", "password errata" e "account solo Google" danno la stessa risposta.
+   * Blocco per account dopo troppi errori (vedi LoginAttemptService).
+   */
+  async login(
+    dto: UserAuthDTO,
+    res: Response,
+    trustedDeviceCookie?: string,
+  ): Promise<void> {
+    const user = await this.userService.getUserByEmail(dto.email);
+
+    const lockedUntil = await this.loginAttemptService.getLockedUntil(
+      dto.email,
+    );
+    const knownDevice =
+      !!user &&
+      verifyTrustedDevice(
+        this.jwtSecret,
+        trustedDeviceCookie,
+        user.id,
+        user.tokenVersion,
+      );
+    // Il dispositivo gia' riconosciuto del proprietario non resta fuori per un blocco causato da altri.
+    if (lockedUntil && !knownDevice) {
+      throw new HttpException(
+        'Too many failed login attempts. Try again later.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const hash = user?.password ?? (await this.getDummyHash());
+    const matches = await this.comparePasswords(dto.password ?? '', hash);
+    const valid = !!user?.password && !!dto.password && matches;
+
+    if (!valid) {
+      if (!lockedUntil) await this.loginAttemptService.recordFailure(dto.email);
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const valid = await this.comparePasswords(dto.password, user.password);
-    if (!valid) throw new UnauthorizedException('Invalid email or password');
+    await this.loginAttemptService.reset(dto.email);
 
     // Dopo la password corretta: chi la conosce puo' sapere che l'email non e' verificata.
     if (!user.emailVerifiedAt) {
@@ -317,10 +397,19 @@ export class AuthService {
       );
     }
 
+    await this.rehashPasswordIfOutdated(user, dto.password as string);
+
     this.setAuthCookies(
       res,
       await this.generateJwtToken(user),
       await this.generateRefreshToken(user),
+    );
+    res.cookie(
+      TRUSTED_DEVICE_COOKIE,
+      createTrustedDeviceCookie(this.jwtSecret, user.id, user.tokenVersion),
+      trustedDeviceCookieOptions(
+        this.configService.get<string>('NODE_ENV') === 'production',
+      ),
     );
 
     if (user.provider === 'google') {
@@ -328,6 +417,29 @@ export class AuthService {
     }
 
     res.status(HttpStatus.OK).json({ message: 'Login successful.' });
+  }
+
+  /** Re-hash trasparente: hash creati con un costo piu' basso dell'attuale vengono rigenerati al login. */
+  private async rehashPasswordIfOutdated(
+    user: User,
+    plainPassword: string,
+  ): Promise<void> {
+    if (
+      !user.password ||
+      bcrypt.getRounds(user.password) >= this.bcryptRounds
+    ) {
+      return;
+    }
+    try {
+      await this.userService.updateUser(user.id, {
+        password: await this.hashPassword(plainPassword),
+      });
+    } catch (error) {
+      // Un re-hash fallito non deve impedire l'accesso: si riprovera' al prossimo login.
+      this.logger.warn(
+        `Re-hash della password non riuscito: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   async handleGoogleCallback(
@@ -368,16 +480,29 @@ export class AuthService {
     }
 
     if (!user) {
-      const userRole = await this.permissionService.findPermission({
-        name: 'USER',
-      });
-      return this.userService.createUser({
-        email: googleUser.email,
-        provider: 'google',
-        googleId: googleUser.googleId,
-        emailVerifiedAt: new Date(),
-        permissions: userRole ? [userRole] : [],
-      });
+      const userRole = await this.permissionService.getRequired('USER');
+      try {
+        return await this.userService.createUser({
+          email: googleUser.email,
+          provider: 'google',
+          googleId: googleUser.googleId,
+          emailVerifiedAt: new Date(),
+          permissions: [userRole],
+        });
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+        // Due primi accessi contemporanei: l'altro ha vinto la corsa, si prosegue col suo utente.
+        user =
+          (await this.userService.getUserByGoogleId(googleUser.googleId)) ??
+          (await this.userService.getUserByEmail(googleUser.email));
+        if (!user) throw error;
+        if (user.googleId && user.googleId !== googleUser.googleId) {
+          throw new GoogleAuthException(
+            'account_conflict',
+            'This account is already linked to a different Google account.',
+          );
+        }
+      }
     }
 
     if (!user.emailVerifiedAt) {

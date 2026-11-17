@@ -1,4 +1,5 @@
 import { AuthToken } from '../../src/common/entities/auth-token.entity';
+import { LoginAttempt } from '../../src/common/entities/login-attempt.entity';
 import { RefreshToken } from '../../src/common/entities/refresh-token.entity';
 import { MailService } from '../../src/modules/mail/mail.service';
 
@@ -7,7 +8,7 @@ import { MailService } from '../../src/modules/mail/mail.service';
  * repository dei token monouso e invio email (mai SMTP vero in questi test).
  * Quando AppModule acquisisce un repository o un servizio esterno nuovo, si aggiunge QUI.
  */
-export { AuthToken, RefreshToken, MailService };
+export { AuthToken, LoginAttempt, RefreshToken, MailService };
 
 export const authTokenRepositoryMock = () => ({
   delete: jest.fn().mockResolvedValue({ affected: 0 }),
@@ -43,6 +44,14 @@ export const refreshTokenRepositoryMock = (
   };
 };
 
+/** Nessun account bloccato; i conteggi veri sono verificati in test/db/d2-login-lockout.e2e-spec.ts. */
+export const loginAttemptRepositoryMock = () => ({
+  query: jest.fn().mockResolvedValue([]),
+  delete: jest.fn().mockResolvedValue({ affected: 0 }),
+  createQueryBuilder: jest.fn(),
+});
+
 export const mailServiceMock = () => ({
   sendVerificationEmail: jest.fn().mockResolvedValue(undefined),
+  sendRegistrationNotice: jest.fn().mockResolvedValue(undefined),
 });

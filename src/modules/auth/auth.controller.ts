@@ -12,9 +12,9 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import {
+  ApiAcceptedResponse,
   ApiBadRequestResponse,
   ApiBody,
-  ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
@@ -29,6 +29,7 @@ import { AuthService } from './auth.service';
 import { AccountService } from './account.service';
 import { GoogleCallbackExceptionFilter } from './google-callback.filter';
 import { buildFrontendRedirect, frontendOrigins } from './frontend-redirect';
+import { TRUSTED_DEVICE_COOKIE } from './trusted-device';
 import { GoogleProfilePayload } from '../../common/interfaces/jwt-payload.interface';
 import {
   ResendVerificationDTO,
@@ -101,15 +102,19 @@ export class AuthController {
   }
 
   @Post('register')
+  @HttpCode(HttpStatus.ACCEPTED)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Register a new user with email and password' })
-  @ApiCreatedResponse({ description: 'User created successfully' })
-  @ApiBadRequestResponse({ description: 'Email already registered' })
+  @ApiOperation({
+    summary: 'Register with email and password (uniform response)',
+    description:
+      'Always answers 202 with the same body, whether or not the address already has an account: ' +
+      'a new address receives a verification email, an existing one receives a notice.',
+  })
+  @ApiAcceptedResponse({ description: 'Request accepted: check your inbox' })
+  @ApiBadRequestResponse({ description: 'Invalid email or password format' })
   @ApiTooManyRequestsResponse({ description: 'Too many requests' })
   @ApiBody({ type: RegisterUserDTO })
-  register(
-    @Body() body: RegisterUserDTO,
-  ): Promise<{ message: string; userId: string }> {
+  register(@Body() body: RegisterUserDTO): Promise<{ message: string }> {
     return this.authService.register(body);
   }
 
@@ -119,10 +124,20 @@ export class AuthController {
   @ApiOperation({ summary: 'Log in with email and password' })
   @ApiOkResponse({ description: 'Login successful' })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  @ApiTooManyRequestsResponse({ description: 'Too many requests' })
+  @ApiTooManyRequestsResponse({
+    description: 'Too many requests (per IP) or account temporarily locked',
+  })
   @ApiBody({ type: UserAuthDTO })
-  login(@Body() body: UserAuthDTO, @Res() res: Response): Promise<void> {
-    return this.authService.login(body, res);
+  login(
+    @Body() body: UserAuthDTO,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    return this.authService.login(
+      body,
+      res,
+      req.cookies?.[TRUSTED_DEVICE_COOKIE] as string | undefined,
+    );
   }
 
   @Post('verify-email')
