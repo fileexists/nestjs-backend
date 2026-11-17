@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   HttpStatus,
   Injectable,
   UnauthorizedException,
@@ -11,23 +12,12 @@ import { CookieOptions, Response } from 'express';
 import type { StringValue } from 'ms';
 import { UserService } from '../user/user.service';
 import { PermissionService } from '../permission/permission.service';
+import { AccountService } from './account.service';
+import { AuthTokenService } from './auth-token.service';
+import { parseDurationMs } from '../../common/utils/duration';
+import { User } from '../../common/entities/user.entity';
 import { UserAuthDTO } from '../../common/dto/register-user.dto';
 import { TokenPayload } from '../../common/interfaces/jwt-payload.interface';
-
-function parseDurationMs(duration: string): number {
-  const match = /^(\d+)(ms|s|m|h|d|w)$/.exec(duration);
-  if (!match) return 0;
-  const value = parseInt(match[1], 10);
-  const units: Record<string, number> = {
-    ms: 1,
-    s: 1_000,
-    m: 60_000,
-    h: 3_600_000,
-    d: 86_400_000,
-    w: 604_800_000,
-  };
-  return value * (units[match[2]] ?? 0);
-}
 
 @Injectable()
 export class AuthService {
@@ -41,6 +31,8 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly userService: UserService,
     private readonly permissionService: PermissionService,
+    private readonly authTokenService: AuthTokenService,
+    private readonly accountService: AccountService,
   ) {
     const jwtSecret = this.configService.get<string>('JWT_SECRET');
     const refreshSecret = this.configService.get<string>(
@@ -182,6 +174,8 @@ export class AuthService {
       provider: 'local',
     });
 
+    await this.accountService.sendVerification(user);
+
     return { message: 'User registered successfully', userId: user.id };
   }
 
@@ -199,6 +193,13 @@ export class AuthService {
 
     const valid = await this.comparePasswords(dto.password, user.password);
     if (!valid) throw new UnauthorizedException('Invalid email or password');
+
+    // Dopo la password corretta: chi la conosce puo' sapere che l'email non e' verificata.
+    if (!user.emailVerifiedAt) {
+      throw new ForbiddenException(
+        'Email not verified. Check your inbox for the verification link.',
+      );
+    }
 
     const token = await this.generateJwtToken(user);
     const refreshToken = await this.generateRefreshToken(user);
@@ -218,28 +219,7 @@ export class AuthService {
     googleUser: { email: string; googleId: string },
     res: Response,
   ): Promise<void> {
-    let user = await this.userService.getUserByEmail(googleUser.email);
-
-    if (!user) {
-      const userRole = await this.permissionService.findPermission({
-        name: 'USER',
-      });
-      user = await this.userService.createUser({
-        email: googleUser.email,
-        provider: 'google',
-        googleId: googleUser.googleId,
-        permissions: userRole ? [userRole] : [],
-      });
-    } else if (!user.googleId) {
-      user = await this.userService.updateUser(user.id, {
-        googleId: googleUser.googleId,
-      });
-    } else if (user.password) {
-      user = await this.userService.updateUser(user.id, {
-        provider: 'combined',
-        googleId: googleUser.googleId,
-      });
-    }
+    const user = await this.resolveGoogleUser(googleUser);
 
     const token = await this.generateJwtToken(user);
     const refreshToken = await this.generateRefreshToken(user);
@@ -248,5 +228,56 @@ export class AuthService {
     res.cookie('access_token', token, accessTokenOptions);
     res.cookie('refresh_token', refreshToken, refreshTokenOptions);
     res.json({ message: 'Authentication with google was successful.' });
+  }
+
+  /**
+   * Trova o crea l'utente per un profilo Google GIA' con email verificata da Google
+   * (lo garantisce la strategia). Regole contro il pre-hijacking:
+   * - account locale NON verificato: la password (che potrebbe essere dell'attaccante)
+   *   viene azzerata e le sessioni invalidate prima di collegare Google;
+   * - account locale verificato: Google viene collegato e la password resta valida.
+   */
+  private async resolveGoogleUser(googleUser: {
+    email: string;
+    googleId: string;
+  }): Promise<User> {
+    let user = await this.userService.getUserByEmail(googleUser.email);
+
+    if (!user) {
+      const userRole = await this.permissionService.findPermission({
+        name: 'USER',
+      });
+      return this.userService.createUser({
+        email: googleUser.email,
+        provider: 'google',
+        googleId: googleUser.googleId,
+        emailVerifiedAt: new Date(),
+        permissions: userRole ? [userRole] : [],
+      });
+    }
+
+    if (!user.emailVerifiedAt) {
+      const claimed = await this.userService.claimUnverifiedForGoogle(
+        user.id,
+        googleUser.googleId,
+      );
+      if (claimed) {
+        await this.authTokenService.invalidateAll(claimed.id);
+        return claimed;
+      }
+      // Verificato nel frattempo dal proprietario: si prosegue con il collegamento normale.
+      user = (await this.userService.getUserById(user.id)) ?? user;
+    }
+
+    if (!user.googleId) {
+      return this.userService.updateUser(user.id, {
+        googleId: googleUser.googleId,
+        provider: user.password ? 'combined' : 'google',
+      });
+    }
+    if (user.password && user.provider !== 'combined') {
+      return this.userService.updateUser(user.id, { provider: 'combined' });
+    }
+    return user;
   }
 }

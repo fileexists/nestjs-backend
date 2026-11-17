@@ -5,6 +5,8 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import * as Joi from 'joi';
 import { join } from 'path';
+import { DURATION_PATTERN } from './common/utils/duration';
+import { parseFrontendUrls } from './common/utils/frontend-url';
 import { ENTITIES } from './common/entities';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
@@ -32,9 +34,37 @@ import { AppController } from './app.controller';
         // Applica le migrazioni all'avvio (default: no, si lanciano con `yarn migration:run`).
         DB_MIGRATIONS_RUN: Joi.boolean().default(false),
         CORS_ORIGIN: Joi.string().default('*'),
+        // Email (SMTP). In sviluppo: Mailpit (localhost:1025, oppure mailpit:1025 dentro compose).
+        SMTP_HOST: Joi.string().when('NODE_ENV', {
+          is: 'production',
+          then: Joi.required(),
+          otherwise: Joi.string().default('localhost'),
+        }),
+        SMTP_PORT: Joi.number().port().default(1025),
+        SMTP_SECURE: Joi.boolean().default(false),
+        SMTP_USER: Joi.string().optional().allow(''),
+        SMTP_PASS: Joi.string().optional().allow(''),
+        MAIL_FROM: Joi.string().default('Auth <no-reply@localhost>'),
+        EMAIL_VERIFICATION_TTL: Joi.string()
+          .pattern(DURATION_PATTERN)
+          .default('24h'),
+        // Whitelist (separata da virgole) delle origini del frontend: link nelle
+        // email e redirect si costruiscono SOLO da qui. La prima e' quella predefinita.
+        FRONTEND_URL: Joi.string()
+          .custom((value: string) => {
+            parseFrontendUrls(value);
+            return value;
+          })
+          .default('http://localhost:3000'),
         GOOGLE_CLIENT_ID: Joi.string().optional().allow(''),
         GOOGLE_CLIENT_SECRET: Joi.string().optional().allow(''),
         GOOGLE_CALLBACK_URL: Joi.string().optional().allow(''),
+      }).custom((env: { NODE_ENV?: string; FRONTEND_URL?: string }) => {
+        // In produzione il frontend e' sempre esplicito e solo https.
+        if (env.NODE_ENV === 'production') {
+          parseFrontendUrls(env.FRONTEND_URL ?? '', { requireHttps: true });
+        }
+        return env;
       }),
       validationOptions: {
         libraryOptions: { allowUnknown: true, abortEarly: true },

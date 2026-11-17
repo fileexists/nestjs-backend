@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
-import { Strategy, VerifyCallback } from 'passport-google-oauth20';
+import { Strategy } from 'passport-google-oauth20';
+import { GoogleProfilePayload } from '../../../common/interfaces/jwt-payload.interface';
+import { GoogleProfileLike, mapGoogleProfile } from './google-profile';
 
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
@@ -18,19 +20,12 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     });
   }
 
+  // Ritorna il payload (Nest chiama `done` per noi); lancia 401 se l'email manca o non e' verificata.
   validate(
     accessToken: string,
     refreshToken: string,
-    profile: { id: string; emails: { value: string }[]; displayName: string },
-    done: VerifyCallback,
-  ): void {
-    const { id, emails, displayName } = profile;
-    done(null, {
-      googleId: id,
-      email: emails?.[0]?.value,
-      name: displayName,
-      accessToken,
-      refreshToken,
-    });
+    profile: GoogleProfileLike,
+  ): GoogleProfilePayload {
+    return { ...mapGoogleProfile(profile), accessToken, refreshToken };
   }
 }

@@ -6,6 +6,7 @@
  */
 import { createHarness, Harness } from './support/harness';
 import { req } from '../utils/http';
+import { sql } from './support/api';
 
 describe('Harness e2e su PostgreSQL vero', () => {
   let h: Harness;
@@ -19,12 +20,14 @@ describe('Harness e2e su PostgreSQL vero', () => {
   });
 
   it('applica le migrazioni (tabella users presente, nessun synchronize)', async () => {
-    const [{ count }] = await h.db.query(
+    const [{ count }] = await sql<{ count: number }>(
+      h,
       `SELECT count(*)::int AS count FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name IN ('users','permissions','migrations')`,
     );
     expect(count).toBe(3);
-    const [{ applied }] = await h.db.query(
+    const [{ applied }] = await sql<{ applied: number }>(
+      h,
       'SELECT count(*)::int AS applied FROM migrations',
     );
     expect(applied).toBeGreaterThan(0);

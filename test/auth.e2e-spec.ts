@@ -32,6 +32,12 @@ import { AuthGuard } from '../src/common/guards/auth.guard';
 import { PermissionsGuard } from '../src/common/guards/permissions.guard';
 import { GoogleOAuthGuard } from '../src/common/guards/google-oauth.guard';
 import { req, ApiResponseBody } from './utils/http';
+import {
+  AuthToken,
+  MailService,
+  authTokenRepositoryMock,
+  mailServiceMock,
+} from './utils/mocks';
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
@@ -51,6 +57,7 @@ const LOCAL_USER: User = {
   provider: 'local',
   googleId: undefined,
   tokenVersion: 0,
+  emailVerifiedAt: new Date('2024-01-01T00:00:00.000Z'),
   permissions: [USER_PERMISSION],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -63,6 +70,7 @@ const GOOGLE_USER: User = {
   provider: 'google',
   googleId: 'google-oauth-id-123',
   tokenVersion: 0,
+  emailVerifiedAt: new Date('2024-01-01T00:00:00.000Z'),
   permissions: [USER_PERMISSION],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -103,6 +111,7 @@ const mockUserRepository = {
       googleId: user.googleId,
       provider: user.provider,
       tokenVersion: user.tokenVersion ?? 0,
+      emailVerifiedAt: user.emailVerifiedAt,
       permissions: user.permissions ?? [],
       createdAt: user.createdAt ?? new Date(),
       updatedAt: new Date(),
@@ -191,6 +200,10 @@ async function createGoogleOverrideApp(
     .useValue({ canActivate: () => Promise.resolve(true) })
     .overrideGuard(GoogleOAuthGuard)
     .useValue(googleGuardStub)
+    .overrideProvider(getRepositoryToken(AuthToken))
+    .useValue(authTokenRepositoryMock())
+    .overrideProvider(MailService)
+    .useValue(mailServiceMock())
     .compile();
 
   const customApp = moduleFixture.createNestApplication();
@@ -225,6 +238,10 @@ describe('AuthController (e2e)', () => {
       .useValue({ canActivate: () => Promise.resolve(true) })
       .overrideProvider(ThrottlerGuard)
       .useValue({ canActivate: () => Promise.resolve(true) })
+      .overrideProvider(getRepositoryToken(AuthToken))
+      .useValue(authTokenRepositoryMock())
+      .overrideProvider(MailService)
+      .useValue(mailServiceMock())
       .compile();
 
     app = moduleFixture.createNestApplication();

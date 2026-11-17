@@ -23,6 +23,11 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
+import { AccountService } from './account.service';
+import {
+  ResendVerificationDTO,
+  VerifyEmailDTO,
+} from '../../common/dto/account.dto';
 import {
   UserAuthDTO,
   RegisterUserDTO,
@@ -34,7 +39,10 @@ import { GoogleOAuthGuard } from '../../common/guards/google-oauth.guard';
 @Controller('auth')
 @Public()
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly accountService: AccountService,
+  ) {}
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
@@ -83,6 +91,39 @@ export class AuthController {
   @ApiBody({ type: UserAuthDTO })
   login(@Body() body: UserAuthDTO, @Res() res: Response): Promise<void> {
     return this.authService.login(body, res);
+  }
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Confirm an email address with the emailed token' })
+  @ApiOkResponse({ description: 'Email verified' })
+  @ApiBadRequestResponse({
+    description: 'Invalid, expired or already used token',
+  })
+  @ApiTooManyRequestsResponse({ description: 'Too many requests' })
+  async verifyEmail(
+    @Body() body: VerifyEmailDTO,
+  ): Promise<{ message: string }> {
+    await this.accountService.verifyEmail(body.token);
+    return { message: 'Email verified successfully.' };
+  }
+
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Resend the email verification message' })
+  @ApiBody({ type: ResendVerificationDTO })
+  @ApiTooManyRequestsResponse({ description: 'Too many requests' })
+  async resendVerification(
+    @Body() body: ResendVerificationDTO,
+  ): Promise<{ message: string }> {
+    await this.accountService.resendVerification(body.email);
+    // Stessa risposta per qualsiasi indirizzo: non rivela se l'account esiste.
+    return {
+      message:
+        'If the address belongs to an account awaiting verification, a new email has been sent.',
+    };
   }
 
   @Get('validate')

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { User } from '../../common/entities/user.entity';
 import { Permission } from '../../common/entities/permission.entity';
 
@@ -70,6 +70,39 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
     await this.userRepository.delete(id);
+  }
+
+  /** Segna l'email come verificata (idempotente: non riscrive una verifica gia' fatta). */
+  async markEmailVerified(id: string): Promise<void> {
+    await this.userRepository.update(
+      { id, emailVerifiedAt: IsNull() },
+      { emailVerifiedAt: new Date() },
+    );
+  }
+
+  /**
+   * Google ha dimostrato il possesso dell'email di un account locale NON verificato:
+   * chi lo ha creato non e' necessariamente il proprietario, quindi la password
+   * viene azzerata e le sessioni invalidate (tokenVersion + 1) prima del collegamento.
+   * Un solo UPDATE condizionale: se nel frattempo l'account e' stato verificato non fa nulla
+   * e ritorna null.
+   */
+  async claimUnverifiedForGoogle(
+    id: string,
+    googleId: string,
+  ): Promise<User | null> {
+    const result = await this.userRepository.update(
+      { id, emailVerifiedAt: IsNull() },
+      {
+        password: () => 'NULL',
+        emailVerifiedAt: () => 'now()',
+        googleId,
+        provider: 'google',
+        tokenVersion: () => '"tokenVersion" + 1',
+      },
+    );
+    if (!result.affected) return null;
+    return this.getUserById(id);
   }
 
   async incrementTokenVersion(id: string): Promise<void> {

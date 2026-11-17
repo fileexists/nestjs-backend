@@ -8,6 +8,7 @@ import { UserService } from '../user/user.service';
 import { PermissionService } from '../permission/permission.service';
 import { User } from '../../common/entities/user.entity';
 import { Permission } from '../../common/entities/permission.entity';
+import { extraAuthProviders, resetAuthMocks } from './testing/auth-mocks';
 
 function buildUser(overrides: Partial<User> = {}): User {
   const user = new User();
@@ -68,6 +69,7 @@ describe('AuthService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: UserService, useValue: mockUserService },
         { provide: PermissionService, useValue: mockPermissionService },
+        ...extraAuthProviders(),
       ],
     }).compile();
 
@@ -76,6 +78,7 @@ describe('AuthService', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    resetAuthMocks();
   });
 
   // =========================================================================

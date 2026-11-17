@@ -3,13 +3,20 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../../src/app.module';
+import { MailService } from '../../../src/modules/mail/mail.service';
 import { configureApp } from '../../../src/app.setup';
 import { createDataSource, resetDatabase, truncateData } from './database';
+import { FakeGoogle } from './google';
+import { MailOutbox } from './mail-outbox';
 
 export interface Harness {
   app: NestExpressApplication;
   /** Connessione diretta al database di test, per preparare/ispezionare i dati. */
   db: DataSource;
+  /** Email "inviate" (MailService sostituito da un outbox in memoria). */
+  mail: MailOutbox;
+  /** Strategia Google con la rete stubbata. */
+  google: FakeGoogle;
   /** Svuota i dati tra un test e l'altro. */
   reset(): Promise<void>;
   close(): Promise<void>;
@@ -18,6 +25,8 @@ export interface Harness {
 export interface HarnessOptions {
   /** Lascia attivo il ThrottlerGuard (default: disattivato, tutte le richieste arrivano dallo stesso IP). */
   throttle?: boolean;
+  /** Usa il MailService vero (SMTP): solo per i test di integrazione con Mailpit. */
+  realMail?: boolean;
 }
 
 /**
@@ -45,16 +54,26 @@ async function boot(db: DataSource, options: HarnessOptions): Promise<Harness> {
       .overrideProvider(ThrottlerGuard)
       .useValue({ canActivate: () => true });
   }
+  const mail = new MailOutbox();
+  if (!options.realMail) {
+    builder = builder.overrideProvider(MailService).useValue(mail);
+  }
   const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication<NestExpressApplication>();
   configureApp(app);
   await app.init();
+  const google = new FakeGoogle().install();
 
   return {
     app,
     db,
-    reset: () => truncateData(db),
+    mail,
+    google,
+    reset: async () => {
+      mail.clear();
+      await truncateData(db);
+    },
     close: async () => {
       await app.close();
       await db.destroy();

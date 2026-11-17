@@ -39,6 +39,8 @@ export class UserSeeder {
       password: hashedPassword,
       permissions: validPermissions,
       provider: 'local',
+      // Creato da un operatore (non auto-registrato): l'email e' considerata verificata.
+      emailVerifiedAt: new Date(),
     });
 
     console.log(`User created: ${email} (ID: ${newUser.id})`);
@@ -70,6 +72,7 @@ export class UserSeeder {
       email,
       permissions: validPermissions,
       provider: 'google',
+      emailVerifiedAt: new Date(),
     });
 
     console.log(`Google user created: ${email} (ID: ${newUser.id})`);
