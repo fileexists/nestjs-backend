@@ -113,6 +113,31 @@ describe('AuthService - verifica email (A1)', () => {
     });
   });
 
+  describe('verifyEmail', () => {
+    it("passa all'account l'hash bcrypt della password scelta, mai la password in chiaro", async () => {
+      await service.verifyEmail('raw-token', 'Chosen-Passw0rd!');
+
+      expect(mockAccountService.verifyEmail).toHaveBeenCalledTimes(1);
+      const [token, hash] = mockAccountService.verifyEmail.mock
+        .calls[0] as unknown as [string, string];
+      expect(token).toBe('raw-token');
+      expect(hash).toMatch(/^\$2[aby]\$\d{2}\$/);
+      expect(hash).not.toContain('Chosen-Passw0rd!');
+      expect(await bcrypt.compare('Chosen-Passw0rd!', hash)).toBe(true);
+    });
+
+    it("calcola l'hash anche se il token non e valido (stesso costo, nessun indizio)", async () => {
+      mockAccountService.verifyEmail.mockRejectedValue(
+        new Error('Invalid or expired token'),
+      );
+
+      await expect(
+        service.verifyEmail('bad', 'Chosen-Passw0rd!'),
+      ).rejects.toThrow('Invalid or expired token');
+      expect(mockAccountService.verifyEmail).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('login', () => {
     it('con password corretta ma email NON verificata risponde 403 e non emette cookie', async () => {
       userService.getUserByEmail.mockResolvedValue(

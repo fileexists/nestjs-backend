@@ -14,7 +14,7 @@ import { MailService } from '../mail/mail.service';
 describe('AccountService (verifica email)', () => {
   const userService = {
     getUserByEmail: jest.fn(),
-    markEmailVerified: jest.fn(),
+    activateWithPassword: jest.fn(),
   };
   const authTokens = {
     issue: jest.fn(),
@@ -85,22 +85,37 @@ describe('AccountService (verifica email)', () => {
   });
 
   describe('verifyEmail', () => {
-    it('segna verificato l utente del token consumato', async () => {
+    it("attiva l'utente del token consumato con la password scelta (gia hashata)", async () => {
       authTokens.consume.mockResolvedValue('u1');
-      await service.verifyEmail('raw-token');
+      userService.activateWithPassword.mockResolvedValue(true);
+
+      await service.verifyEmail('raw-token', 'new-hash');
+
       expect(authTokens.consume).toHaveBeenCalledWith(
         'raw-token',
         AuthTokenType.EMAIL_VERIFICATION,
       );
-      expect(userService.markEmailVerified).toHaveBeenCalledWith('u1');
+      expect(userService.activateWithPassword).toHaveBeenCalledWith(
+        'u1',
+        'new-hash',
+      );
     });
 
     it('rifiuta token non valido, scaduto o gia usato con 400', async () => {
       authTokens.consume.mockResolvedValue(null);
-      await expect(service.verifyEmail('bad')).rejects.toBeInstanceOf(
+      await expect(service.verifyEmail('bad', 'h')).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(userService.markEmailVerified).not.toHaveBeenCalled();
+      expect(userService.activateWithPassword).not.toHaveBeenCalled();
+    });
+
+    it("account gia verificato (o sparito): 400, la password non cambia e l'errore e quello del token non valido", async () => {
+      authTokens.consume.mockResolvedValue('u1');
+      userService.activateWithPassword.mockResolvedValue(false);
+
+      await expect(service.verifyEmail('old', 'h')).rejects.toThrow(
+        'Invalid or expired token',
+      );
     });
   });
 

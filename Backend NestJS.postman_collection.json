@@ -125,7 +125,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"token\": \"<token ricevuto via email>\"\n}",
+							"raw": "{\n  \"token\": \"<token ricevuto via email>\",\n  \"password\": \"MyStrongPassword123!\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -145,7 +145,7 @@
 								"verify-email"
 							]
 						},
-						"description": "Conferma l'indirizzo email con il token del link. Monouso, con scadenza."
+						"description": "Conferma l'indirizzo email con il token del link e sceglie la password dell'account (sostituisce quella della registrazione). Monouso, con scadenza."
 					}
 				},
 				{

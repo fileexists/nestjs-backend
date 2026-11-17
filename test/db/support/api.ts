@@ -58,8 +58,9 @@ export function resetPassword(h: Harness, token: string, password: string) {
   return http(h).post('/api/auth/reset-password').send({ token, password });
 }
 
-export function verifyEmail(h: Harness, token: string) {
-  return http(h).post('/api/auth/verify-email').send({ token });
+/** Conferma l'email scegliendo (o riconfermando) la password dell'account. */
+export function verifyEmail(h: Harness, token: string, password = PASSWORD) {
+  return http(h).post('/api/auth/verify-email').send({ token, password });
 }
 
 /** Registra e conferma l'email tramite il token "ricevuto" nell'outbox. */
@@ -77,6 +78,7 @@ export async function createVerifiedUser(
   const verified = await verifyEmail(
     h,
     h.mail.lastToken(email, 'verification'),
+    password,
   );
   if (verified.status !== 200) {
     throw new Error(

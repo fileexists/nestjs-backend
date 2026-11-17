@@ -92,7 +92,7 @@ describe('A1 - pre-hijacking (e2e, PostgreSQL vero)', () => {
 
     const res = await http(h)
       .post('/api/auth/verify-email')
-      .send({ token: staleToken });
+      .send({ token: staleToken, password: 'Takeover-Passw0rd-1!' });
     expect(res.status).toBe(400);
   });
 

@@ -145,7 +145,9 @@ export class AuthController {
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Confirm an email address with the emailed token' })
+  @ApiOperation({
+    summary: 'Confirm the email with the emailed token and set the password',
+  })
   @ApiOkResponse({ description: 'Email verified' })
   @ApiBadRequestResponse({
     description: 'Invalid, expired or already used token',
@@ -154,7 +156,7 @@ export class AuthController {
   async verifyEmail(
     @Body() body: VerifyEmailDTO,
   ): Promise<{ message: string }> {
-    await this.accountService.verifyEmail(body.token);
+    await this.authService.verifyEmail(body.token, body.password);
     return { message: 'Email verified successfully.' };
   }
 

@@ -451,6 +451,19 @@ export class AuthService {
   }
 
   /**
+   * Conferma l'email scegliendo la password. L'hash si calcola PRIMA di guardare il token, cosi'
+   * token valido e non valido costano lo stesso. Chi conferma e' il proprietario della casella:
+   * la sua password sostituisce quella inserita alla registrazione (che potrebbe essere di un
+   * altro: pre-hijacking).
+   */
+  async verifyEmail(token: string, password: string): Promise<void> {
+    await this.accountService.verifyEmail(
+      token,
+      await this.hashPassword(password),
+    );
+  }
+
+  /**
    * Reimposta la password con il token ricevuto via email (monouso, con scadenza).
    * Invalida TUTTE le sessioni (tokenVersion + refresh token), i dispositivi riconosciuti, i token
    * pendenti e il blocco per tentativi falliti. Il token e' consumato in modo atomico.

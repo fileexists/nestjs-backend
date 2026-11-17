@@ -147,15 +147,21 @@ export class AccountService {
     this.dispatch(this.mailService.sendRegistrationNotice(user.email));
   }
 
-  async verifyEmail(token: string): Promise<void> {
+  /**
+   * Conferma l'email con il token monouso e imposta la password scelta (gia' hashata).
+   * Il token viene consumato in ogni caso; se l'account era gia' verificato non cambia nulla.
+   */
+  async verifyEmail(token: string, passwordHash: string): Promise<void> {
     const userId = await this.authTokenService.consume(
       token,
       AuthTokenType.EMAIL_VERIFICATION,
     );
-    if (!userId) {
+    if (
+      !userId ||
+      !(await this.userService.activateWithPassword(userId, passwordHash))
+    ) {
       throw new BadRequestException('Invalid or expired token');
     }
-    await this.userService.markEmailVerified(userId);
   }
 
   /**

@@ -161,7 +161,7 @@ All routes below sit behind the global `/api` prefix (see [Project Structure](#p
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | POST | `/api/auth/register` | Register with email + password. Always `202` with the same body, whether or not the address exists | Public |
-| POST | `/api/auth/verify-email` | Confirm the email with the emailed token | Public |
+| POST | `/api/auth/verify-email` | Confirm the email with the emailed token **and choose the password** (`{ token, password }`; replaces the one given at registration) | Public |
 | POST | `/api/auth/resend-verification` | Resend the verification email (uniform `202`) | Public |
 | POST | `/api/auth/login` | Login (requires a verified email; `429` when the account is temporarily locked) | Public |
 | POST | `/api/auth/refresh` | Rotate the refresh token (cookie `refresh_token`) | Public |

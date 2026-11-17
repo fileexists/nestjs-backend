@@ -7,7 +7,7 @@
  * E2E_MAILPIT_API=http://localhost:8025 yarn test:e2e:db).
  */
 import { createHarness, Harness } from './support/harness';
-import { http, register, userRow } from './support/api';
+import { PASSWORD, http, register, userRow } from './support/api';
 
 const MAILPIT_API = process.env.E2E_MAILPIT_API;
 const suite = MAILPIT_API ? describe : describe.skip;
@@ -74,7 +74,11 @@ suite('SMTP reale (Mailpit)', () => {
 
     const token = decodeURIComponent(match![1]);
     expect(
-      (await http(h).post('/api/auth/verify-email').send({ token })).status,
+      (
+        await http(h)
+          .post('/api/auth/verify-email')
+          .send({ token, password: PASSWORD })
+      ).status,
     ).toBe(200);
     expect((await userRow(h, email))?.emailVerifiedAt).not.toBeNull();
   });

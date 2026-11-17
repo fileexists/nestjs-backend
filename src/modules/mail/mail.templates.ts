@@ -49,10 +49,10 @@ export function verificationEmail(link: string, ttlMs: number): MailContent {
     'Conferma il tuo indirizzo email',
     [
       'Ciao,',
-      `abbiamo ricevuto una richiesta di registrazione con questo indirizzo. Per attivare l'account conferma la tua email: il link vale ${humanizeTtl(ttlMs)} e si può usare una sola volta.`,
+      `abbiamo ricevuto una richiesta di registrazione con questo indirizzo. Per attivare l'account conferma la tua email e scegli la tua password: il link vale ${humanizeTtl(ttlMs)} e si può usare una sola volta.`,
       "Se non sei stato tu, ignora questo messaggio: senza conferma l'account non viene attivato.",
     ],
-    { label: 'Conferma email', url: link },
+    { label: 'Conferma email e scegli la password', url: link },
   );
 }
 

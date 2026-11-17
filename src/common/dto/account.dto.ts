@@ -9,6 +9,19 @@ export class VerifyEmailDTO {
   @MinLength(20)
   @MaxLength(200)
   token: string;
+
+  @ApiProperty({
+    example: 'MyStrongPassword123!',
+    minLength: 8,
+    maxLength: 72,
+    description:
+      "Password dell'account, scelta da chi conferma l'email: sostituisce quella inserita alla registrazione",
+  })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(72)
+  @MaxBytes(72)
+  password: string;
 }
 
 export class ResendVerificationDTO {

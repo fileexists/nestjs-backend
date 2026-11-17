@@ -107,12 +107,21 @@ export class UserService {
     await this.userRepository.delete(id);
   }
 
-  /** Segna l'email come verificata (idempotente: non riscrive una verifica gia' fatta). */
-  async markEmailVerified(id: string): Promise<void> {
-    await this.userRepository.update(
+  /**
+   * Conferma dell'email: l'account diventa verificato con la password scelta da chi ha
+   * confermato (quella della registrazione potrebbe essere di un altro). Solo se non e'
+   * gia' verificato: un token di verifica non deve mai cambiare la password di un account
+   * attivo. Ritorna false se l'account non esiste piu' o era gia' verificato.
+   */
+  async activateWithPassword(
+    id: string,
+    passwordHash: string,
+  ): Promise<boolean> {
+    const result = await this.userRepository.update(
       { id, emailVerifiedAt: IsNull() },
-      { emailVerifiedAt: new Date() },
+      { password: passwordHash, emailVerifiedAt: () => 'now()' },
     );
+    return !!result.affected;
   }
 
   /**

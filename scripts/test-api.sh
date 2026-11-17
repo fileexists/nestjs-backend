@@ -59,7 +59,7 @@ verify_email() {
   [[ -n "$id" ]] || { echo ""; return 1; }
   token=$(curl -s "$MAILPIT_URL/api/v1/message/$id" | jq -r '.Text' | grep -o 'token=[^[:space:]]*' | head -1 | cut -d= -f2)
   [[ -n "$token" ]] || { echo ""; return 1; }
-  POST "/api/auth/verify-email" "{\"token\":\"$token\"}"
+  POST "/api/auth/verify-email" "{\"token\":\"$token\",\"password\":\"$TEST_PASS\"}"
 }
 
 # =============================================================================
