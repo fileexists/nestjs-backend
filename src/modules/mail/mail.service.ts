@@ -14,6 +14,33 @@ import {
 const DEFAULT_EMAIL_VERIFICATION_TTL = '24h';
 const DEFAULT_PASSWORD_RESET_TTL = '1h';
 
+/** Attese tra un tentativo e il successivo: 3 tentativi in tutto. */
+export const MAIL_RETRY_DELAYS_MS = [2_000, 10_000];
+
+/** Errori di rete o risposte 4xx dell'SMTP: ha senso riprovare. Il resto (5xx, auth) no. */
+const TRANSIENT_CODES = new Set([
+  'ETIMEDOUT',
+  'ECONNECTION',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ESOCKET',
+  'EPIPE',
+  'EDNS',
+]);
+
+export function isTransientMailError(error: unknown): boolean {
+  const { code, responseCode } = (error ?? {}) as {
+    code?: unknown;
+    responseCode?: unknown;
+  };
+  if (typeof code === 'string' && TRANSIENT_CODES.has(code)) return true;
+  return (
+    typeof responseCode === 'number' &&
+    responseCode >= 400 &&
+    responseCode < 500
+  );
+}
+
 /**
  * Invio email via SMTP (SMTP_HOST/SMTP_PORT; in sviluppo Mailpit su mailpit:1025).
  * I link puntano SEMPRE al frontend configurato (prima origine di FRONTEND_URL):
@@ -83,13 +110,26 @@ export class MailService {
   }
 
   private async send(to: string, content: MailContent): Promise<void> {
-    await this.transporter.sendMail({
+    const message = {
       from: this.from,
       to,
       subject: content.subject,
       text: content.text,
       html: content.html,
-    });
-    this.logger.log(`Email "${content.subject}" inviata`);
+    };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.transporter.sendMail(message);
+        this.logger.log(`Email "${content.subject}" inviata`);
+        return;
+      } catch (error) {
+        const delay = MAIL_RETRY_DELAYS_MS[attempt];
+        if (delay === undefined || !isTransientMailError(error)) throw error;
+        this.logger.warn(
+          `Invio email non riuscito (${error instanceof Error ? error.message : String(error)}), riprovo tra ${delay / 1000}s`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
   }
 }

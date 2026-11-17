@@ -1,6 +1,10 @@
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
-import { MailService } from './mail.service';
+import {
+  MAIL_RETRY_DELAYS_MS,
+  MailService,
+  isTransientMailError,
+} from './mail.service';
 import { humanizeTtl } from './mail.templates';
 
 jest.mock('nodemailer');
@@ -117,6 +121,68 @@ describe('MailService', () => {
     await expect(
       build().sendVerificationEmail('user@example.com', 't'),
     ).rejects.toThrow('ECONNREFUSED');
+  });
+
+  describe('tentativi', () => {
+    const timeout = () =>
+      Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' });
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      sendMail.mockReset().mockResolvedValue({});
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('riprova dopo un errore di rete e alla fine invia', async () => {
+      sendMail.mockRejectedValueOnce(timeout());
+      const sending = build().sendVerificationEmail('user@example.com', 't');
+
+      await jest.advanceTimersByTimeAsync(MAIL_RETRY_DELAYS_MS[0]);
+      await sending;
+
+      expect(sendMail).toHaveBeenCalledTimes(2);
+    });
+
+    it('rinuncia dopo 3 tentativi e propaga l ultimo errore', async () => {
+      sendMail.mockRejectedValue(timeout());
+      const sending = build().sendVerificationEmail('user@example.com', 't');
+      const outcome = expect(sending).rejects.toThrow('timeout');
+
+      await jest.advanceTimersByTimeAsync(
+        MAIL_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0),
+      );
+      await outcome;
+
+      expect(sendMail).toHaveBeenCalledTimes(3);
+    });
+
+    it('non riprova un errore definitivo (rifiuto 5xx)', async () => {
+      sendMail.mockRejectedValue(
+        Object.assign(new Error('mailbox unavailable'), { responseCode: 550 }),
+      );
+
+      await expect(
+        build().sendVerificationEmail('user@example.com', 't'),
+      ).rejects.toThrow('mailbox unavailable');
+      expect(sendMail).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('isTransientMailError', () => {
+  it.each([
+    [{ code: 'ETIMEDOUT' }, true],
+    [{ code: 'ECONNECTION' }, true],
+    [{ responseCode: 421 }, true],
+    [{ responseCode: 450 }, true],
+    [{ responseCode: 550 }, false],
+    [{ code: 'EAUTH', responseCode: 535 }, false],
+    [new Error('boh'), false],
+    [null, false],
+  ])('%j -> %s', (error, expected) => {
+    expect(isTransientMailError(error)).toBe(expected);
   });
 });
 
