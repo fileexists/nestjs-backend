@@ -9,6 +9,7 @@ import {
   http,
   login,
   register,
+  settle,
   userRow,
   verifyEmail,
 } from './support/api';
@@ -140,6 +141,7 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
         .post('/api/auth/resend-verification')
         .send({ email: EMAIL });
       expect(res.status).toBe(202);
+      await settle(h);
       expect(h.mail.to(EMAIL, 'verification')).toHaveLength(2);
 
       const newToken = h.mail.lastToken(EMAIL, 'verification');
@@ -154,6 +156,7 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
         .post('/api/auth/resend-verification')
         .send({ email: EMAIL });
       expect(res.status).toBe(202);
+      await settle(h);
       expect(h.mail.to(EMAIL, 'verification')).toHaveLength(1);
     });
 
@@ -169,6 +172,7 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
         .post('/api/auth/resend-verification')
         .send({ email: EMAIL });
 
+      await settle(h);
       expect(unknown.status).toBe(202);
       expect(verified.status).toBe(202);
       expect(body(unknown)).toBe(body(verified));

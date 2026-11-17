@@ -90,6 +90,29 @@ describe('UserService', () => {
     });
   });
 
+  describe('resetPassword (E)', () => {
+    it('un solo UPDATE: nuova password, email verificata, sessioni invalidate, google -> combined', async () => {
+      mockUserRepository.update.mockResolvedValue({ affected: 1 });
+
+      await service.resetPassword('uuid-1234', '$2b$12$newhash');
+
+      expect(mockUserRepository.update).toHaveBeenCalledTimes(1);
+      const [id, set] = mockUserRepository.update.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(id).toBe('uuid-1234');
+      expect(set.password).toBe('$2b$12$newhash');
+      expect((set.tokenVersion as () => string)()).toBe('"tokenVersion" + 1');
+      expect((set.emailVerifiedAt as () => string)()).toContain(
+        'COALESCE("emailVerifiedAt", now())',
+      );
+      expect((set.provider as () => string)()).toContain(
+        "WHEN \"provider\" = 'google' THEN 'combined'",
+      );
+    });
+  });
+
   describe('violazione di unicita (D4)', () => {
     it.each([{ code: '23505' }, { driverError: { code: '23505' } }])(
       'createUser traduce %j in 409 Conflict (mai 500)',

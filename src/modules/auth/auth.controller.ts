@@ -32,7 +32,9 @@ import { buildFrontendRedirect, frontendOrigins } from './frontend-redirect';
 import { TRUSTED_DEVICE_COOKIE } from './trusted-device';
 import { GoogleProfilePayload } from '../../common/interfaces/jwt-payload.interface';
 import {
+  ForgotPasswordDTO,
   ResendVerificationDTO,
+  ResetPasswordDTO,
   VerifyEmailDTO,
 } from '../../common/dto/account.dto';
 import {
@@ -162,15 +164,55 @@ export class AuthController {
   @ApiOperation({ summary: 'Resend the email verification message' })
   @ApiBody({ type: ResendVerificationDTO })
   @ApiTooManyRequestsResponse({ description: 'Too many requests' })
-  async resendVerification(
-    @Body() body: ResendVerificationDTO,
-  ): Promise<{ message: string }> {
-    await this.accountService.resendVerification(body.email);
+  resendVerification(@Body() body: ResendVerificationDTO): { message: string } {
+    // In background: i tempi di risposta non dipendono dall'esistenza dell'account.
+    this.accountService.queueResendVerification(body.email);
     // Stessa risposta per qualsiasi indirizzo: non rivela se l'account esiste.
     return {
       message:
         'If the address belongs to an account awaiting verification, a new email has been sent.',
     };
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Request a password reset email (uniform response)',
+    description:
+      'Always answers 202 with the same body, whether or not the address has an account.',
+  })
+  @ApiAcceptedResponse({
+    description: 'If the address has an account, an email was sent',
+  })
+  @ApiTooManyRequestsResponse({ description: 'Too many requests' })
+  @ApiBody({ type: ForgotPasswordDTO })
+  forgotPassword(@Body() body: ForgotPasswordDTO): { message: string } {
+    // In background: i tempi di risposta non dipendono dall'esistenza dell'account.
+    this.accountService.queuePasswordReset(body.email);
+    return {
+      message:
+        'If the address belongs to an account, an email with a password reset link has been sent.',
+    };
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Set a new password with the emailed token (revokes all sessions)',
+  })
+  @ApiOkResponse({ description: 'Password updated; all sessions were revoked' })
+  @ApiBadRequestResponse({
+    description: 'Invalid, expired or already used token',
+  })
+  @ApiTooManyRequestsResponse({ description: 'Too many requests' })
+  @ApiBody({ type: ResetPasswordDTO })
+  async resetPassword(
+    @Body() body: ResetPasswordDTO,
+  ): Promise<{ message: string }> {
+    await this.authService.resetPassword(body.token, body.password);
+    return { message: 'Password updated. Please log in again.' };
   }
 
   @Get('validate')

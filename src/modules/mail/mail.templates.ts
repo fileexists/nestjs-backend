@@ -71,3 +71,15 @@ export function registrationNoticeEmail(
     { label: 'Accedi', url: loginUrl },
   );
 }
+
+export function passwordResetEmail(link: string, ttlMs: number): MailContent {
+  return layout(
+    'Reimposta la tua password',
+    [
+      'Ciao,',
+      `abbiamo ricevuto una richiesta per reimpostare la password di questo account. Il link vale ${humanizeTtl(ttlMs)} e si può usare una sola volta; dopo il cambio tutte le sessioni attive verranno chiuse.`,
+      'Se non sei stato tu, ignora questo messaggio: la tua password non cambierà.',
+    ],
+    { label: 'Reimposta la password', url: link },
+  );
+}

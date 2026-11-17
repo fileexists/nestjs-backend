@@ -19,6 +19,7 @@ describe('validazione ambiente', () => {
       SMTP_HOST: 'localhost',
       SMTP_PORT: 1025,
       EMAIL_VERIFICATION_TTL: '24h',
+      PASSWORD_RESET_TTL: '1h',
       REFRESH_REUSE_GRACE_SECONDS: 0,
       LOGIN_MAX_FAILED_ATTEMPTS: 5,
       LOGIN_LOCK_BASE_SECONDS: 60,
@@ -95,6 +96,10 @@ describe('validazione ambiente', () => {
     it('la porta deve essere valida', () => {
       expect(validate({ SMTP_PORT: 70000 }).error).toBeDefined();
       expect(validate({ SMTP_PORT: 587 }).error).toBeUndefined();
+    });
+    it('la durata del link di reset password ha un formato valido', () => {
+      expect(validate({ PASSWORD_RESET_TTL: '30m' }).error).toBeUndefined();
+      expect(validate({ PASSWORD_RESET_TTL: 'presto' }).error).toBeDefined();
     });
     it('la durata del link di verifica ha un formato valido', () => {
       expect(validate({ EMAIL_VERIFICATION_TTL: '2d' }).error).toBeUndefined();

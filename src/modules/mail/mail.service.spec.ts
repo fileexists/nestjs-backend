@@ -16,6 +16,7 @@ describe('MailService', () => {
       MAIL_FROM: 'Test <no-reply@test.local>',
       FRONTEND_URL: 'https://app.example.com,https://admin.example.com',
       EMAIL_VERIFICATION_TTL: '24h',
+      PASSWORD_RESET_TTL: '1h',
       ...env,
     };
     return new MailService({
@@ -93,6 +94,22 @@ describe('MailService', () => {
     expect(message.text).toContain('https://app.example.com/login');
     expect(message.text).toContain('https://app.example.com/forgot-password');
     expect(message.text).not.toContain('token=');
+  });
+
+  it('il link di reset password punta al frontend e contiene il token (valido 1 ora)', async () => {
+    await build().sendPasswordResetEmail('user@example.com', 'reset_tok-1');
+
+    const message = (sendMail.mock.calls as unknown[][])[0][0] as {
+      text: string;
+      html: string;
+      subject: string;
+    };
+    expect(message.subject).toMatch(/password/i);
+    expect(message.text).toContain(
+      'https://app.example.com/reset-password?token=reset_tok-1',
+    );
+    expect(message.html).toContain('/reset-password?token=reset_tok-1');
+    expect(message.text).toMatch(/1 ora/);
   });
 
   it('propaga gli errori SMTP al chiamante', async () => {

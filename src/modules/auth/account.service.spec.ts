@@ -24,6 +24,7 @@ describe('AccountService (verifica email)', () => {
   const mail = {
     sendVerificationEmail: jest.fn(),
     sendRegistrationNotice: jest.fn(),
+    sendPasswordResetEmail: jest.fn(),
   };
   const config = {
     get: jest.fn((key: string) =>
@@ -39,6 +40,7 @@ describe('AccountService (verifica email)', () => {
     );
     mail.sendVerificationEmail.mockResolvedValue(undefined);
     mail.sendRegistrationNotice.mockResolvedValue(undefined);
+    mail.sendPasswordResetEmail.mockResolvedValue(undefined);
     authTokens.issue.mockResolvedValue('raw-token');
     const module = await Test.createTestingModule({
       providers: [
@@ -202,6 +204,122 @@ describe('AccountService (verifica email)', () => {
       await expect(
         service.sendRegistrationNotice(user),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('requestPasswordReset (E)', () => {
+    const user = { id: 'u1', email: 'a@example.com' };
+
+    it('per un account esistente emette un token di reset col TTL configurato e lo invia', async () => {
+      userService.getUserByEmail.mockResolvedValue(user);
+      authTokens.findLatestActive.mockResolvedValue(null);
+
+      await service.requestPasswordReset('a@example.com');
+      await service.drain();
+
+      expect(authTokens.issue).toHaveBeenCalledWith(
+        'u1',
+        AuthTokenType.PASSWORD_RESET,
+        expect.any(Number),
+      );
+      expect(mail.sendPasswordResetEmail).toHaveBeenCalledWith(
+        'a@example.com',
+        'raw-token',
+      );
+    });
+
+    it('per un indirizzo inesistente non fa nulla e non lancia (nessun indizio)', async () => {
+      userService.getUserByEmail.mockResolvedValue(null);
+
+      await expect(
+        service.requestPasswordReset('ghost@example.com'),
+      ).resolves.toBeUndefined();
+      expect(authTokens.issue).not.toHaveBeenCalled();
+      expect(mail.sendPasswordResetEmail).not.toHaveBeenCalled();
+    });
+
+    it('vale anche per account non verificati o solo-Google', async () => {
+      for (const account of [
+        { ...user, emailVerifiedAt: undefined, password: 'hash' },
+        { ...user, emailVerifiedAt: new Date(), password: undefined },
+      ]) {
+        userService.getUserByEmail.mockResolvedValue(account);
+        authTokens.findLatestActive.mockResolvedValue(null);
+        mail.sendPasswordResetEmail.mockClear();
+
+        await service.requestPasswordReset('a@example.com');
+        await service.drain();
+
+        expect(mail.sendPasswordResetEmail).toHaveBeenCalledTimes(1);
+      }
+    });
+
+    it('rispetta il periodo di attesa tra due richieste', async () => {
+      userService.getUserByEmail.mockResolvedValue(user);
+      authTokens.findLatestActive.mockResolvedValue({
+        createdAt: new Date(Date.now() - RESEND_COOLDOWN_MS / 2),
+      });
+
+      await service.requestPasswordReset('a@example.com');
+
+      expect(mail.sendPasswordResetEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('lavori in background (risposte uniformi)', () => {
+    it('runInBackground non aspetta il lavoro, non propaga gli errori e drain li attende', async () => {
+      let finished = false;
+      service.runInBackground(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        finished = true;
+      });
+      service.runInBackground(() => Promise.reject(new Error('boom')));
+
+      expect(finished).toBe(false);
+      await expect(service.drain()).resolves.toBeUndefined();
+      expect(finished).toBe(true);
+    });
+
+    it('drain attende anche i lavori accodati da altri lavori (es. invio email dentro la richiesta)', async () => {
+      const order: string[] = [];
+      service.runInBackground(async () => {
+        await Promise.resolve();
+        service.runInBackground(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          order.push('inner');
+        });
+        order.push('outer');
+      });
+
+      await service.drain();
+
+      expect(order).toEqual(['outer', 'inner']);
+    });
+
+    it('queuePasswordReset e queueResendVerification ritornano subito e fanno il lavoro dopo', async () => {
+      userService.getUserByEmail.mockResolvedValue({
+        id: 'u1',
+        email: 'a@example.com',
+        password: 'h',
+      });
+      authTokens.findLatestActive.mockResolvedValue(null);
+
+      const result = service.queuePasswordReset('a@example.com');
+      expect(result).toBeUndefined();
+      expect(mail.sendPasswordResetEmail).not.toHaveBeenCalled();
+
+      await service.drain();
+      expect(mail.sendPasswordResetEmail).toHaveBeenCalledTimes(1);
+
+      service.queueResendVerification('a@example.com');
+      await service.drain();
+      expect(mail.sendVerificationEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it('un errore nel lavoro in background non fa mai fallire la richiesta', async () => {
+      userService.getUserByEmail.mockRejectedValue(new Error('db down'));
+      expect(() => service.queuePasswordReset('a@example.com')).not.toThrow();
+      await expect(service.drain()).resolves.toBeUndefined();
     });
   });
 });

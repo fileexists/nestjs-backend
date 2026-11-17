@@ -9,6 +9,7 @@ import {
   http,
   login,
   register,
+  settle,
   sql,
   userRow,
   verifyEmail,
@@ -67,6 +68,7 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
       .post('/api/auth/resend-verification')
       .send({ email: MIXED });
     expect(resend.status).toBe(202);
+    await settle(h);
     expect((await verifyEmail(h, token)).status).toBe(200);
     expect((await userRow(h, LOWER))?.emailVerifiedAt).not.toBeNull();
   });

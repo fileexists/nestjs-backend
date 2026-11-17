@@ -7,6 +7,7 @@ import { UserService } from '../user/user.service';
 import { AuthTokenService } from './auth-token.service';
 
 const DEFAULT_EMAIL_VERIFICATION_TTL = '24h';
+const DEFAULT_PASSWORD_RESET_TTL = '1h';
 /** Tra un invio e il successivo per lo stesso account. */
 export const RESEND_COOLDOWN_MS = 60_000;
 /** Al massimo un avviso "indirizzo gia' registrato" ogni 10 minuti per la stessa casella. */
@@ -17,6 +18,9 @@ export const NOTICE_COOLDOWN_MS = 10 * 60_000;
 export class AccountService {
   private readonly logger = new Logger(AccountService.name);
   private readonly verificationTtlMs: number;
+  private readonly passwordResetTtlMs: number;
+  /** Lavori in corso fuori dal ciclo della richiesta HTTP (vedi runInBackground). */
+  private readonly background = new Set<Promise<void>>();
 
   constructor(
     private readonly userService: UserService,
@@ -29,6 +33,72 @@ export class AccountService {
         configService.get<string>('EMAIL_VERIFICATION_TTL') ??
           DEFAULT_EMAIL_VERIFICATION_TTL,
       ) || parseDurationMs(DEFAULT_EMAIL_VERIFICATION_TTL);
+    this.passwordResetTtlMs =
+      parseDurationMs(
+        configService.get<string>('PASSWORD_RESET_TTL') ??
+          DEFAULT_PASSWORD_RESET_TTL,
+      ) || parseDurationMs(DEFAULT_PASSWORD_RESET_TTL);
+  }
+
+  /**
+   * Esegue un lavoro SENZA farlo aspettare alla richiesta HTTP. Serve agli endpoint a risposta
+   * uniforme (reinvio verifica, reset password): se la risposta aspettasse database ed email, i
+   * tempi rivelerebbero se l'indirizzo ha un account. Gli errori vengono solo loggati.
+   */
+  runInBackground(task: () => Promise<void>): void {
+    const run: Promise<void> = Promise.resolve()
+      .then(task)
+      .catch((error: unknown) => {
+        this.logger.error(
+          `Operazione in background fallita: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      })
+      .finally(() => {
+        this.background.delete(run);
+      });
+    this.background.add(run);
+  }
+
+  /** Attende i lavori in background in corso (spegnimento ordinato e test). */
+  async drain(): Promise<void> {
+    while (this.background.size > 0) {
+      await Promise.allSettled([...this.background]);
+    }
+  }
+
+  queueResendVerification(email: string): void {
+    this.runInBackground(() => this.resendVerification(email));
+  }
+
+  queuePasswordReset(email: string): void {
+    this.runInBackground(() => this.requestPasswordReset(email));
+  }
+
+  /**
+   * Invia il link di reset password. Non rivela mai se l'indirizzo esiste: per account
+   * inesistenti o troppo recenti non succede nulla. Vale anche per account non verificati
+   * (il reset dimostra il possesso della casella) e solo-Google (potranno impostare una password).
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const user = await this.userService.getUserByEmail(email);
+    if (!user) return;
+
+    const latest = await this.authTokenService.findLatestActive(
+      user.id,
+      AuthTokenType.PASSWORD_RESET,
+    );
+    if (
+      latest &&
+      Date.now() - latest.createdAt.getTime() < RESEND_COOLDOWN_MS
+    ) {
+      return;
+    }
+    const token = await this.authTokenService.issue(
+      user.id,
+      AuthTokenType.PASSWORD_RESET,
+      this.passwordResetTtlMs,
+    );
+    this.dispatch(this.mailService.sendPasswordResetEmail(user.email, token));
   }
 
   /**
@@ -105,10 +175,6 @@ export class AccountService {
   }
 
   private dispatch(sending: Promise<void>): void {
-    sending.catch((error: unknown) => {
-      this.logger.error(
-        `Invio email fallito: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
+    this.runInBackground(() => sending);
   }
 }

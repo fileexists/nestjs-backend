@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   HttpException,
@@ -20,6 +21,7 @@ import { AuthTokenService } from './auth-token.service';
 import { RefreshTokenService } from './refresh-token.service';
 import { parseDurationMs } from '../../common/utils/duration';
 import { GoogleAuthException } from './google-auth.exception';
+import { AuthTokenType } from '../../common/entities/auth-token.entity';
 import { User } from '../../common/entities/user.entity';
 import {
   RegisterUserDTO,
@@ -417,6 +419,30 @@ export class AuthService {
     }
 
     res.status(HttpStatus.OK).json({ message: 'Login successful.' });
+  }
+
+  /**
+   * Reimposta la password con il token ricevuto via email (monouso, con scadenza).
+   * Invalida TUTTE le sessioni (tokenVersion + refresh token), i dispositivi riconosciuti, i token
+   * pendenti e il blocco per tentativi falliti. Il token e' consumato in modo atomico.
+   */
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const userId = await this.authTokenService.consume(
+      token,
+      AuthTokenType.PASSWORD_RESET,
+    );
+    const user = userId ? await this.userService.getUserById(userId) : null;
+    if (!userId || !user) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+
+    await this.userService.resetPassword(
+      userId,
+      await this.hashPassword(newPassword),
+    );
+    await this.refreshTokenService.revokeAllForUser(userId);
+    await this.authTokenService.invalidateAll(userId);
+    await this.loginAttemptService.reset(user.email);
   }
 
   /** Re-hash trasparente: hash creati con un costo piu' basso dell'attuale vengono rigenerati al login. */

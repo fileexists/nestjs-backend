@@ -16,3 +16,28 @@ export class ResendVerificationDTO {
   @IsEmail()
   email: string;
 }
+
+export class ForgotPasswordDTO {
+  @ApiProperty({ example: 'user@example.com' })
+  @NormalizeEmail()
+  @IsEmail()
+  email: string;
+}
+
+export class ResetPasswordDTO {
+  @ApiProperty({ description: 'Token ricevuto via email (link di reset)' })
+  @IsString()
+  @MinLength(20)
+  @MaxLength(200)
+  token: string;
+
+  @ApiProperty({
+    example: 'NewStrongPassword123!',
+    minLength: 8,
+    maxLength: 72,
+  })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(72)
+  password: string;
+}

@@ -54,4 +54,5 @@ export const loginAttemptRepositoryMock = () => ({
 export const mailServiceMock = () => ({
   sendVerificationEmail: jest.fn().mockResolvedValue(undefined),
   sendRegistrationNotice: jest.fn().mockResolvedValue(undefined),
+  sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
 });

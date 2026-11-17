@@ -140,6 +140,21 @@ export class UserService {
     return this.getUserById(id);
   }
 
+  /**
+   * Password reimpostata via link email: nuova password, email considerata verificata (il link
+   * dimostra il possesso della casella), un account solo-Google diventa "combined" e le sessioni
+   * vengono invalidate (tokenVersion + 1). Un solo UPDATE.
+   */
+  async resetPassword(id: string, passwordHash: string): Promise<void> {
+    await this.userRepository.update(id, {
+      password: passwordHash,
+      emailVerifiedAt: () => 'COALESCE("emailVerifiedAt", now())',
+      tokenVersion: () => '"tokenVersion" + 1',
+      provider: () =>
+        `CASE WHEN "provider" = 'google' THEN 'combined' ELSE "provider" END`,
+    });
+  }
+
   async incrementTokenVersion(id: string): Promise<void> {
     await this.userRepository.increment({ id }, 'tokenVersion', 1);
   }

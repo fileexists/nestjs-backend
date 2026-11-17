@@ -14,6 +14,9 @@ export interface SentMail {
 export class MailOutbox {
   readonly sent: SentMail[] = [];
 
+  /** Ritardo artificiale (ms) dell'invio del reset password: simula un SMTP lento. */
+  delayMs = 0;
+
   sendVerificationEmail(to: string, token: string): Promise<void> {
     this.sent.push({ kind: 'verification', to, token });
     return Promise.resolve();
@@ -25,9 +28,11 @@ export class MailOutbox {
     return Promise.resolve();
   }
 
-  sendPasswordResetEmail(to: string, token: string): Promise<void> {
+  async sendPasswordResetEmail(to: string, token: string): Promise<void> {
+    if (this.delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    }
     this.sent.push({ kind: 'password-reset', to, token });
-    return Promise.resolve();
   }
 
   clear(): void {

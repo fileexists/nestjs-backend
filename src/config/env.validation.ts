@@ -41,6 +41,8 @@ export const envValidationSchema = Joi.object({
   SMTP_PASS: Joi.string().optional().allow(''),
   MAIL_FROM: Joi.string().default('Auth <no-reply@localhost>'),
   EMAIL_VERIFICATION_TTL: Joi.string().pattern(DURATION_PATTERN).default('24h'),
+  // Durata del link di reset password.
+  PASSWORD_RESET_TTL: Joi.string().pattern(DURATION_PATTERN).default('1h'),
   // Whitelist (separata da virgole) delle origini del frontend: link nelle
   // email e redirect si costruiscono SOLO da qui. La prima e' quella predefinita.
   FRONTEND_URL: Joi.string()

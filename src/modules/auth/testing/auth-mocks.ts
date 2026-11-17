@@ -36,6 +36,7 @@ export const mockLoginAttemptService = {
 export const mockMailService = {
   sendVerificationEmail: jest.fn(),
   sendRegistrationNotice: jest.fn(),
+  sendPasswordResetEmail: jest.fn(),
 };
 
 export const mockAccountService = {
@@ -43,6 +44,9 @@ export const mockAccountService = {
   sendRegistrationNotice: jest.fn(),
   verifyEmail: jest.fn(),
   resendVerification: jest.fn(),
+  requestPasswordReset: jest.fn(),
+  queueResendVerification: jest.fn(),
+  queuePasswordReset: jest.fn(),
 };
 
 export function extraAuthProviders(): Provider[] {

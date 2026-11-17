@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { AccountService } from '../../../src/modules/auth/account.service';
 import type { Harness } from './harness';
 
 export const PASSWORD = 'Correct-Passw0rd!';
@@ -39,6 +40,22 @@ export async function timed(fn: () => PromiseLike<unknown>): Promise<number> {
   const start = process.hrtime.bigint();
   await fn();
   return Number(process.hrtime.bigint() - start) / 1e6;
+}
+
+/**
+ * Attende i lavori in background dell'app (invio email di reinvio/reset: la risposta HTTP
+ * non li aspetta, per non rivelare con i tempi se un indirizzo esiste).
+ */
+export async function settle(h: Harness): Promise<void> {
+  await h.app.get(AccountService).drain();
+}
+
+export function forgotPassword(h: Harness, email: string) {
+  return http(h).post('/api/auth/forgot-password').send({ email });
+}
+
+export function resetPassword(h: Harness, token: string, password: string) {
+  return http(h).post('/api/auth/reset-password').send({ token, password });
 }
 
 export function verifyEmail(h: Harness, token: string) {

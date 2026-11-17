@@ -6,11 +6,13 @@ import { parseFrontendUrls } from '../../common/utils/frontend-url';
 import { parseDurationMs } from '../../common/utils/duration';
 import {
   MailContent,
+  passwordResetEmail,
   registrationNoticeEmail,
   verificationEmail,
 } from './mail.templates';
 
 const DEFAULT_EMAIL_VERIFICATION_TTL = '24h';
+const DEFAULT_PASSWORD_RESET_TTL = '1h';
 
 /**
  * Invio email via SMTP (SMTP_HOST/SMTP_PORT; in sviluppo Mailpit su mailpit:1025).
@@ -25,6 +27,7 @@ export class MailService {
   private readonly from: string;
   private readonly frontendUrl: string;
   private readonly verificationTtlMs: number;
+  private readonly passwordResetTtlMs: number;
 
   constructor(private readonly configService: ConfigService) {
     const user = this.configService.get<string>('SMTP_USER');
@@ -51,11 +54,21 @@ export class MailService {
         this.configService.get<string>('EMAIL_VERIFICATION_TTL') ??
           DEFAULT_EMAIL_VERIFICATION_TTL,
       ) || parseDurationMs(DEFAULT_EMAIL_VERIFICATION_TTL);
+    this.passwordResetTtlMs =
+      parseDurationMs(
+        this.configService.get<string>('PASSWORD_RESET_TTL') ??
+          DEFAULT_PASSWORD_RESET_TTL,
+      ) || parseDurationMs(DEFAULT_PASSWORD_RESET_TTL);
   }
 
   async sendVerificationEmail(to: string, token: string): Promise<void> {
     const link = `${this.frontendUrl}/verify-email?token=${encodeURIComponent(token)}`;
     await this.send(to, verificationEmail(link, this.verificationTtlMs));
+  }
+
+  async sendPasswordResetEmail(to: string, token: string): Promise<void> {
+    const link = `${this.frontendUrl}/reset-password?token=${encodeURIComponent(token)}`;
+    await this.send(to, passwordResetEmail(link, this.passwordResetTtlMs));
   }
 
   /** Avviso a chi possiede l'indirizzo: qualcuno ha provato a registrarlo di nuovo. */
