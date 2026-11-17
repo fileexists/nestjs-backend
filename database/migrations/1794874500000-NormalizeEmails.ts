@@ -11,7 +11,8 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *      l'email diventa `local+dup-<n>-<id>@dominio` (<n> = posizione nel gruppo, quindi unica), la password viene disattivata, l'email
  *      risulta non verificata e le sessioni sono invalidate (tokenVersion + 1);
  *    - ogni modifica e' registrata in `user_email_changes` (email e password originali)
- *      per un eventuale merge manuale e per il `down`.
+ *      per un eventuale merge manuale e per il `down`. La tabella nasce solo se c'e'
+ *      qualcosa da registrare: un database nuovo, o gia' in regola, non la riceve.
  * 3. Crea l'indice univoco su lower(email).
  *
  * Nota: TypeORM non sa descrivere indici su espressione ne conosce la tabella di
@@ -22,6 +23,23 @@ export class NormalizeEmails1794874500000 implements MigrationInterface {
   name = 'NormalizeEmails1794874500000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // Un duplicato case-insensitive ha per forza almeno un'email non normalizzata (l'unicita'
+    // esatta sull'email esiste gia'), quindi basta guardare questo.
+    const [{ dirty }] = (await queryRunner.query(
+      `SELECT EXISTS (SELECT 1 FROM "users" WHERE "email" <> lower(btrim("email"))) AS dirty`,
+    )) as { dirty: boolean }[];
+
+    if (dirty) {
+      await this.archiveAndNormalize(queryRunner);
+    }
+
+    // Vincolo: nessun duplicato case-insensitive, nemmeno con SQL diretto.
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_users_email_lower" ON "users" (lower("email"))`,
+    );
+  }
+
+  private async archiveAndNormalize(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE "user_email_changes" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -84,15 +102,17 @@ export class NormalizeEmails1794874500000 implements MigrationInterface {
     await queryRunner.query(
       `UPDATE "users" SET "email" = lower(btrim("email")) WHERE "email" <> lower(btrim("email"))`,
     );
-
-    // 3) Vincolo: nessun duplicato case-insensitive, nemmeno con SQL diretto.
-    await queryRunner.query(
-      `CREATE UNIQUE INDEX "UQ_users_email_lower" ON "users" (lower("email"))`,
-    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP INDEX "public"."UQ_users_email_lower"`);
+
+    // Senza registro non c'e' nulla da ripristinare (database nuovo o gia' in regola).
+    const [{ archive }] = (await queryRunner.query(
+      `SELECT to_regclass('public.user_email_changes') IS NOT NULL AS archive`,
+    )) as { archive: boolean }[];
+    if (!archive) return;
+
     // Ripristino in DUE fasi: il vincolo di unicita' esatto sull'email e' controllato riga per
     // riga, quindi prima si rimettono le email originali degli account canonici/normalizzati
     // (che oggi occupano la forma minuscola) e solo dopo quelle dei duplicati.

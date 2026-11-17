@@ -238,3 +238,79 @@ describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
     expect(table[0].t).toBeNull();
   });
 });
+
+describe('B2 - NormalizeEmails su un database nuovo o gia pulito', () => {
+  let before: DataSource;
+  let withB2: DataSource | undefined;
+
+  // Schema da zero fino alla migrazione precedente, poi (opzionale) un utente gia' in regola.
+  async function prepare(seedCleanUser: boolean) {
+    await withB2?.destroy();
+    await before?.destroy();
+    before = await dataSource(migrationsUpTo(false)).initialize();
+    await before.query('DROP SCHEMA IF EXISTS public CASCADE');
+    await before.query('CREATE SCHEMA public');
+    await before.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+    await before.runMigrations();
+    if (seedCleanUser) {
+      await before.query(
+        `INSERT INTO users (email, password) VALUES ('clean@example.com', 'hash')`,
+      );
+    }
+    withB2 = await dataSource(migrationsUpTo(true)).initialize();
+    await withB2.runMigrations();
+  }
+
+  const tableExists = async () =>
+    (
+      await withB2!.query<{ t: string | null }[]>(
+        `SELECT to_regclass('public.user_email_changes') AS t`,
+      )
+    )[0].t !== null;
+
+  const uniqueIndexExists = async () =>
+    (
+      await withB2!.query<unknown[]>(
+        `SELECT 1 FROM pg_indexes WHERE indexname = 'UQ_users_email_lower'`,
+      )
+    ).length === 1;
+
+  afterAll(async () => {
+    await withB2?.destroy();
+    await before?.destroy();
+  });
+
+  it.each([
+    ['database vuoto', false],
+    ['solo email gia in regola', true],
+  ])(
+    '%s: nessuna tabella di archivio, vincolo di unicita presente',
+    async (_name, seed) => {
+      await prepare(seed);
+
+      expect(await tableExists()).toBe(false);
+      expect(await uniqueIndexExists()).toBe(true);
+      await withB2!.query(
+        `INSERT INTO users (email) VALUES ('new@example.com')`,
+      );
+      await expect(
+        withB2!.query(`INSERT INTO users (email) VALUES ('NEW@example.com')`),
+      ).rejects.toMatchObject({ code: '23505' });
+    },
+  );
+
+  it('il down funziona anche senza tabella di archivio e la migrazione si puo rilanciare', async () => {
+    await prepare(true);
+
+    await withB2!.undoLastMigration();
+    expect(await uniqueIndexExists()).toBe(false);
+    expect(await tableExists()).toBe(false);
+    const [{ email }] = await withB2!.query<{ email: string }[]>(
+      `SELECT email FROM users`,
+    );
+    expect(email).toBe('clean@example.com');
+
+    await withB2!.runMigrations();
+    expect(await uniqueIndexExists()).toBe(true);
+  });
+});

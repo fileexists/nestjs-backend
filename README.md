@@ -101,22 +101,24 @@ yarn migration:generate database/migrations/<MigrationName>
 
 The schema changes **only** through `database/migrations/`. To apply them at startup instead, set `DB_MIGRATIONS_RUN=true`.
 
-> **Existing databases:** `NormalizeEmails` renames duplicate accounts (same email apart from case) and archives them in `user_email_changes`; local accounts created before `AddEmailVerification` start **unverified** and must verify their email (or reset their password) to log in with a password. Accounts created by `yarn seed` are verified. An admin created before this change can log in again after "forgot password", or you can verify the account by hand:
+> **Existing databases:** `NormalizeEmails` renames duplicate accounts (same email apart from case) and archives them in `user_email_changes` (see below); local accounts created before `AddEmailVerification` start **unverified** and must verify their email (or reset their password) to log in with a password. Accounts created by `yarn seed` are verified. An admin created before this change can log in again after "forgot password", or you can verify the account by hand:
 
 ```sql
 UPDATE users SET "emailVerifiedAt" = now() WHERE email = 'admin@example.com';
 ```
 
-**`user_email_changes`** is a one-off archive written by `NormalizeEmails`; the application never reads it. For each account whose email was touched it stores the original email (`reason = 'normalized'`: only trimmed/lowercased; `reason = 'duplicate'`: same address as another account apart from case, so it was renamed to `name+dup-N-id@domain` and its password disabled). For duplicates it also keeps the old password hash and verification date, so nothing is lost if two people really did sign up with `Mario@x.com` and `mario@x.com`. On a database created from scratch it stays empty.
+**New installs can ignore this.** `NormalizeEmails` only has work to do on a database that already holds emails with capital letters or stray spaces. On an empty (or already tidy) database it just adds the unique index on `lower(email)`, and the table below is never created.
 
-After upgrading an existing database, check whether there is anything to review:
+On an upgraded database that did need fixing, the migration creates **`user_email_changes`**: a one-off archive that the application never reads. Each row is an account whose email was touched, with the original value (`reason = 'normalized'`: only trimmed/lowercased; `reason = 'duplicate'`: same address as another account apart from case, so it was renamed to `name+dup-N-id@domain` and its password disabled). For duplicates it also keeps the old password hash and verification date, so nothing is lost if two people really did sign up with `Mario@x.com` and `mario@x.com`.
+
+Check whether there is anything to review:
 
 ```sql
 SELECT reason, count(*) FROM user_email_changes GROUP BY reason;
 SELECT "originalEmail", "newEmail", "canonicalUserId" FROM user_email_changes WHERE reason = 'duplicate';
 ```
 
-If there are no `duplicate` rows, or you have already sorted them out, drop the table by hand (`DROP TABLE user_email_changes;`): it holds old password hashes that no longer serve a purpose. Do it only once you no longer plan to run `migration:revert` on `NormalizeEmails`, because its `down` reads this table.
+If there are no `duplicate` rows, or you have already sorted them out, drop the table by hand (`DROP TABLE user_email_changes;`): it holds old password hashes that no longer serve a purpose. The `down` of `NormalizeEmails` still works afterwards, it just has nothing to restore.
 
 ### 5. Seed the database
 
