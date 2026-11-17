@@ -46,7 +46,12 @@ export class AccountService {
    * tempi rivelerebbero se l'indirizzo ha un account. Gli errori vengono solo loggati.
    */
   runInBackground(task: () => Promise<void>): void {
-    const run: Promise<void> = Promise.resolve()
+    // setImmediate: il lavoro parte DOPO che la risposta e' stata scritta; con un semplice
+    // microtask le query dell'account esistente girerebbero prima e ritarderebbero (di poco,
+    // ma in modo misurabile) la risposta rispetto a un indirizzo sconosciuto.
+    const run: Promise<void> = new Promise<void>((resolve) =>
+      setImmediate(resolve),
+    )
       .then(task)
       .catch((error: unknown) => {
         this.logger.error(
