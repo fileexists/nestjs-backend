@@ -107,6 +107,17 @@ The schema changes **only** through `database/migrations/`. To apply them at sta
 UPDATE users SET "emailVerifiedAt" = now() WHERE email = 'admin@example.com';
 ```
 
+**`user_email_changes`** is a one-off archive written by `NormalizeEmails`; the application never reads it. For each account whose email was touched it stores the original email (`reason = 'normalized'`: only trimmed/lowercased; `reason = 'duplicate'`: same address as another account apart from case, so it was renamed to `name+dup-N-id@domain` and its password disabled). For duplicates it also keeps the old password hash and verification date, so nothing is lost if two people really did sign up with `Mario@x.com` and `mario@x.com`. On a database created from scratch it stays empty.
+
+After upgrading an existing database, check whether there is anything to review:
+
+```sql
+SELECT reason, count(*) FROM user_email_changes GROUP BY reason;
+SELECT "originalEmail", "newEmail", "canonicalUserId" FROM user_email_changes WHERE reason = 'duplicate';
+```
+
+If there are no `duplicate` rows, or you have already sorted them out, drop the table by hand (`DROP TABLE user_email_changes;`): it holds old password hashes that no longer serve a purpose. Do it only once you no longer plan to run `migration:revert` on `NormalizeEmails`, because its `down` reads this table.
+
 ### 5. Seed the database
 
 ```bash
