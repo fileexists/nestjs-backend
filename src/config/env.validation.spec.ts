@@ -6,7 +6,9 @@ const BASE = {
   DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
 };
 
-const validate = (env: Record<string, unknown>) =>
+const validate = (
+  env: Record<string, unknown>,
+): { value: Record<string, unknown>; error?: Error } =>
   envValidationSchema.validate({ ...BASE, ...env }, { allowUnknown: true });
 
 describe('validazione ambiente', () => {
@@ -20,7 +22,7 @@ describe('validazione ambiente', () => {
       SMTP_PORT: 1025,
       EMAIL_VERIFICATION_TTL: '24h',
       PASSWORD_RESET_TTL: '1h',
-      REFRESH_REUSE_GRACE_SECONDS: 0,
+      REFRESH_REUSE_GRACE_SECONDS: 10,
       LOGIN_MAX_FAILED_ATTEMPTS: 5,
       LOGIN_LOCK_BASE_SECONDS: 60,
       LOGIN_LOCK_MAX_SECONDS: 900,

@@ -22,9 +22,13 @@ export const envValidationSchema = Joi.object({
   LOGIN_LOCK_MAX_SECONDS: Joi.number().integer().min(1).default(900),
   LOGIN_ATTEMPT_WINDOW_SECONDS: Joi.number().integer().min(1).default(1800),
   REFRESH_TOKEN_EXPIRATION: Joi.string().default('7d'),
-  // Tolleranza (secondi) per il riuso di un refresh token appena ruotato (richieste
-  // parallele del browser). 0 = ogni riuso e' trattato come furto.
-  REFRESH_REUSE_GRACE_SECONDS: Joi.number().integer().min(0).max(60).default(0),
+  // Entro questi secondi dalla rotazione, un secondo uso dello stesso refresh token (due
+  // schede, richieste parallele) viene solo rifiutato; dopo, e' trattato come furto.
+  REFRESH_REUSE_GRACE_SECONDS: Joi.number()
+    .integer()
+    .min(0)
+    .max(60)
+    .default(10),
   DATABASE_URL: Joi.string().required(),
   // Applica le migrazioni all'avvio (default: no, si lanciano con `yarn migration:run`).
   DB_MIGRATIONS_RUN: Joi.boolean().default(false),

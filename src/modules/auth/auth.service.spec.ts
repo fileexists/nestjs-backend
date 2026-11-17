@@ -60,7 +60,7 @@ const mockUserService = {
 };
 
 const mockPermissionService = {
-  findPermission: jest.fn(),
+  getRequired: jest.fn(),
 };
 
 describe('AuthService', () => {
@@ -432,6 +432,20 @@ describe('AuthService', () => {
       expect(mockUserService.incrementTokenVersion).toHaveBeenCalledWith(
         'uuid-1234',
       );
+      expect(mockRefreshTokenService.create).not.toHaveBeenCalled();
+    });
+
+    it('a reuse right after the rotation is only rejected: the family stays valid (parallel requests)', async () => {
+      mockRefreshTokenService.rotate.mockResolvedValue({
+        status: 'reused',
+        token: storedToken({ usedAt: new Date(Date.now() - 2_000) }),
+      });
+
+      await expect(
+        service.refreshTokens('parallel.token'),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(mockRefreshTokenService.revokeFamily).not.toHaveBeenCalled();
+      expect(mockUserService.incrementTokenVersion).not.toHaveBeenCalled();
       expect(mockRefreshTokenService.create).not.toHaveBeenCalled();
     });
 

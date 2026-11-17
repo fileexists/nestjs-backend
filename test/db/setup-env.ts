@@ -17,6 +17,8 @@ process.env.REFRESH_TOKEN_EXPIRATION = '7d';
 process.env.CORS_ORIGIN = 'http://localhost:3000';
 process.env.FRONTEND_URL = 'http://localhost:3000';
 process.env.BCRYPT_ROUNDS = '4';
+// Nessuna tolleranza: i test sul riuso del refresh token si aspettano la revoca immediata.
+process.env.REFRESH_REUSE_GRACE_SECONDS = '0';
 // Google: credenziali finte. La rete verso Google viene sempre stubbata (support/google.ts).
 process.env.GOOGLE_CLIENT_ID = 'e2e-google-client-id';
 process.env.GOOGLE_CLIENT_SECRET = 'e2e-google-client-secret';

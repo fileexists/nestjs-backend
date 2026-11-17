@@ -89,7 +89,7 @@ export class AuthService {
     );
     this.reuseGraceMs =
       Number(
-        this.configService.get<number>('REFRESH_REUSE_GRACE_SECONDS') ?? 0,
+        this.configService.get<number>('REFRESH_REUSE_GRACE_SECONDS') ?? 10,
       ) * 1000;
   }
 
