@@ -8,7 +8,11 @@ import { UserService } from '../user/user.service';
 import { PermissionService } from '../permission/permission.service';
 import { User } from '../../common/entities/user.entity';
 import { Permission } from '../../common/entities/permission.entity';
-import { extraAuthProviders, resetAuthMocks } from './testing/auth-mocks';
+import {
+  extraAuthProviders,
+  mockRefreshTokenService,
+  resetAuthMocks,
+} from './testing/auth-mocks';
 
 function buildUser(overrides: Partial<User> = {}): User {
   const user = new User();
@@ -52,6 +56,7 @@ const mockUserService = {
   createUser: jest.fn(),
   updateUser: jest.fn(),
   incrementTokenVersion: jest.fn(),
+  getAuthState: jest.fn(),
 };
 
 const mockPermissionService = {
@@ -137,22 +142,21 @@ describe('AuthService', () => {
   // =========================================================================
 
   describe('generateJwtToken', () => {
-    it('should call jwtService.signAsync with the correct payload and options', async () => {
-      const user = buildUser();
-      const fakeToken = 'signed.jwt.token';
-      mockJwtService.signAsync.mockResolvedValue(fakeToken);
+    it('should sign id, email AND tokenVersion with the access-token secret and expiry', async () => {
+      const user = buildUser({ tokenVersion: 4 });
+      mockJwtService.signAsync.mockResolvedValue('signed.jwt.token');
 
       const token = await service.generateJwtToken(user);
 
       expect(mockJwtService.signAsync).toHaveBeenCalledTimes(1);
       expect(mockJwtService.signAsync).toHaveBeenCalledWith(
-        { id: user.id, email: user.email },
+        { id: user.id, email: user.email, tokenVersion: 4 },
         expect.objectContaining({
           secret: expect.any(String) as string,
-          expiresIn: expect.any(String) as string,
+          expiresIn: '15m',
         }),
       );
-      expect(token).toBe(fakeToken);
+      expect(token).toBe('signed.jwt.token');
     });
 
     it('should NOT embed the permissions array in the payload (authorization is always checked live against the DB)', async () => {
@@ -178,41 +182,83 @@ describe('AuthService', () => {
   // =========================================================================
 
   describe('generateRefreshToken', () => {
-    it('should call jwtService.signAsync with the correct payload (including tokenVersion) and refresh expiration', async () => {
+    it('should sign a refresh token with a unique jti and a family id, using the refresh secret and expiry', async () => {
       const user = buildUser({ tokenVersion: 3 });
       mockJwtService.signAsync.mockResolvedValue('refresh.token.value');
 
       const token = await service.generateRefreshToken(user);
 
-      expect(mockJwtService.signAsync).toHaveBeenCalledTimes(1);
       expect(mockJwtService.signAsync).toHaveBeenCalledWith(
         {
           id: user.id,
           email: user.email,
-          tokenVersion: user.tokenVersion,
+          tokenVersion: 3,
+          fid: expect.any(String) as string,
         },
-        expect.objectContaining({ expiresIn: '7d' }),
+        expect.objectContaining({
+          expiresIn: '7d',
+          jwtid: expect.any(String) as string,
+        }),
       );
       expect(token).toBe('refresh.token.value');
     });
 
-    it('should embed user id, email and tokenVersion in the signed payload', async () => {
-      const user = buildUser({ tokenVersion: 2 });
+    it('should register the token (jti, family, expiry) in the refresh_tokens store', async () => {
+      const user = buildUser();
       mockJwtService.signAsync.mockResolvedValue('refresh.token');
+      const before = Date.now();
 
       await service.generateRefreshToken(user);
 
-      const callArgs = mockJwtService.signAsync.mock.calls[0][0] as {
-        id: string;
-        email: string;
-        tokenVersion: number;
+      const [payload, options] = mockJwtService.signAsync.mock.calls[0] as [
+        { fid: string },
+        { jwtid: string },
+      ];
+      expect(mockRefreshTokenService.create).toHaveBeenCalledTimes(1);
+      const stored = (
+        mockRefreshTokenService.create.mock.calls as unknown[][]
+      )[0][0] as {
+        userId: string;
+        jti: string;
+        familyId: string;
+        expiresAt: Date;
       };
-      expect(callArgs.id).toBe(user.id);
-      expect(callArgs.email).toBe(user.email);
-      expect(callArgs.tokenVersion).toBe(2);
+      expect(stored.userId).toBe(user.id);
+      expect(stored.jti).toBe(options.jwtid);
+      expect(stored.familyId).toBe(payload.fid);
+      expect(stored.expiresAt.getTime()).toBeGreaterThanOrEqual(
+        before + 7 * 86_400_000,
+      );
     });
 
-    it('should NOT embed tokenVersion in the access token payload', async () => {
+    it('should start a NEW family at login and generate a different jti every time', async () => {
+      mockJwtService.signAsync.mockResolvedValue('t');
+
+      await service.generateRefreshToken(buildUser());
+      await service.generateRefreshToken(buildUser());
+
+      const [a, b] = mockRefreshTokenService.create.mock.calls.map(
+        (c: unknown[]) => c[0] as { jti: string; familyId: string },
+      );
+      expect(a.jti).not.toBe(b.jti);
+      expect(a.familyId).not.toBe(b.familyId);
+    });
+
+    it('should keep the given family id when rotating', async () => {
+      mockJwtService.signAsync.mockResolvedValue('t');
+
+      await service.generateRefreshToken(buildUser(), 'family-xyz');
+
+      expect(mockRefreshTokenService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ familyId: 'family-xyz' }),
+      );
+      expect(mockJwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ fid: 'family-xyz' }),
+        expect.anything(),
+      );
+    });
+
+    it('should embed tokenVersion in the access token payload (session revocation is checked per request)', async () => {
       const user = buildUser({ tokenVersion: 5 });
       mockJwtService.signAsync.mockResolvedValue('access.token');
 
@@ -222,166 +268,286 @@ describe('AuthService', () => {
         string,
         unknown
       >;
-      expect(callArgs.tokenVersion).toBeUndefined();
+      expect(callArgs.tokenVersion).toBe(5);
     });
   });
 
   // =========================================================================
-  // verifyJwtToken
+  // verifyJwtToken / assertSessionCurrent
   // =========================================================================
 
   describe('verifyJwtToken', () => {
-    it('should return the decoded payload when the token is valid', async () => {
-      const payload = { id: 'uuid-1', email: 'a@b.com' };
+    it('should return the decoded payload when the token is valid and its session is current', async () => {
+      const payload = {
+        id: 'uuid-1234',
+        email: 'test@example.com',
+        tokenVersion: 0,
+      };
       mockJwtService.verifyAsync.mockResolvedValue(payload);
+      mockUserService.getAuthState.mockResolvedValue({ tokenVersion: 0 });
 
-      const result = await service.verifyJwtToken('valid.token');
+      await expect(service.verifyJwtToken('valid.jwt.token')).resolves.toEqual(
+        payload,
+      );
+    });
 
-      expect(result).toEqual(payload);
+    it('should throw UnauthorizedException when the token carries a stale tokenVersion', async () => {
+      mockJwtService.verifyAsync.mockResolvedValue({
+        id: 'uuid-1234',
+        tokenVersion: 0,
+      });
+      mockUserService.getAuthState.mockResolvedValue({ tokenVersion: 1 });
+
+      await expect(service.verifyJwtToken('stale.jwt')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
     });
 
     it('should throw UnauthorizedException when jwtService.verifyAsync throws', async () => {
       mockJwtService.verifyAsync.mockRejectedValue(new Error('jwt expired'));
 
-      await expect(service.verifyJwtToken('expired.token')).rejects.toThrow(
+      await expect(service.verifyJwtToken('expired.jwt.token')).rejects.toThrow(
         UnauthorizedException,
-      );
-      await expect(service.verifyJwtToken('expired.token')).rejects.toThrow(
-        'Invalid or expired token',
       );
     });
 
     it('should throw UnauthorizedException for a completely malformed token string', async () => {
-      mockJwtService.verifyAsync.mockRejectedValue(new Error('invalid token'));
+      mockJwtService.verifyAsync.mockRejectedValue(new Error('jwt malformed'));
 
       await expect(service.verifyJwtToken('not-a-jwt')).rejects.toThrow(
         UnauthorizedException,
       );
     });
+
+    it('should throw UnauthorizedException when no token is provided', async () => {
+      await expect(service.verifyJwtToken(undefined)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  describe('assertSessionCurrent', () => {
+    it('accepts a payload whose tokenVersion matches the database', async () => {
+      mockUserService.getAuthState.mockResolvedValue({ tokenVersion: 2 });
+      await expect(
+        service.assertSessionCurrent({ id: 'u1', tokenVersion: 2 }),
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      [
+        'tokenVersion diverso',
+        { id: 'u1', tokenVersion: 1 },
+        { tokenVersion: 2 },
+      ],
+      ['utente cancellato', { id: 'u1', tokenVersion: 0 }, null],
+      [
+        'token senza tokenVersion (emesso prima della modifica)',
+        { id: 'u1' },
+        { tokenVersion: 0 },
+      ],
+    ])('rejects: %s', async (_label, payload, state) => {
+      mockUserService.getAuthState.mockResolvedValue(state);
+      await expect(
+        service.assertSessionCurrent(payload),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('rejects a payload without id without touching the database', async () => {
+      await expect(service.assertSessionCurrent({})).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      expect(mockUserService.getAuthState).not.toHaveBeenCalled();
+    });
   });
 
   // =========================================================================
-  // refreshTokens
+  // refreshTokens (rotazione + reuse detection)
   // =========================================================================
 
   describe('refreshTokens', () => {
-    it('should reload the user from the DB and return new tokens when tokenVersion matches', async () => {
-      const user = buildUser({ tokenVersion: 1 });
-      const decoded = {
-        id: user.id,
-        email: user.email,
-        permissions: [],
-        tokenVersion: 1,
-      };
-
-      mockJwtService.verifyAsync.mockResolvedValueOnce(decoded);
-      mockUserService.getUserById.mockResolvedValueOnce(user);
-      mockJwtService.signAsync.mockResolvedValueOnce('new.access.token');
-      mockJwtService.signAsync.mockResolvedValueOnce('new.refresh.token');
-
-      const result = await service.refreshTokens('valid.refresh.token');
-
-      expect(mockUserService.getUserById).toHaveBeenCalledWith(user.id);
-      expect(result.token).toBe('new.access.token');
-      expect(result.refreshToken).toBe('new.refresh.token');
+    const decoded = {
+      id: 'uuid-1234',
+      email: 'test@example.com',
+      tokenVersion: 0,
+      jti: 'jti-1',
+      fid: 'family-1',
+    };
+    const storedToken = (overrides: Record<string, unknown> = {}) => ({
+      id: 'row-1',
+      userId: 'uuid-1234',
+      familyId: 'family-1',
+      usedAt: new Date(),
+      ...overrides,
     });
 
-    it('should sign the new tokens from the freshly loaded user, not the stale decoded payload', async () => {
-      const user = buildUser({
-        tokenVersion: 0,
-        email: 'current@example.com',
+    beforeEach(() => {
+      mockJwtService.verifyAsync.mockResolvedValue(decoded);
+      mockJwtService.signAsync.mockResolvedValue('new.token');
+      mockRefreshTokenService.rotate.mockResolvedValue({
+        status: 'rotated',
+        token: storedToken(),
       });
-      const decoded = {
-        id: user.id,
-        email: 'stale@example.com',
-        tokenVersion: 0,
-      };
-
-      mockJwtService.verifyAsync.mockResolvedValueOnce(decoded);
-      mockUserService.getUserById.mockResolvedValueOnce(user);
-      mockJwtService.signAsync.mockResolvedValueOnce('new.access.token');
-      mockJwtService.signAsync.mockResolvedValueOnce('new.refresh.token');
-
-      await service.refreshTokens('valid.refresh.token');
-
-      const accessTokenCallArgs = mockJwtService.signAsync.mock.calls[0][0] as {
-        email: string;
-      };
-      expect(accessTokenCallArgs.email).toBe('current@example.com');
     });
 
-    it('should throw UnauthorizedException when the refresh token is expired', async () => {
-      mockJwtService.verifyAsync.mockRejectedValueOnce(
-        new Error('jwt expired'),
+    it('rotates: marks the old jti as used and issues a new pair in the SAME family', async () => {
+      mockUserService.getUserById.mockResolvedValue(buildUser());
+
+      const result = await service.refreshTokens('old.refresh.token');
+
+      expect(result).toEqual({ token: 'new.token', refreshToken: 'new.token' });
+      expect(mockRefreshTokenService.rotate).toHaveBeenCalledWith('jti-1');
+      expect(mockRefreshTokenService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ familyId: 'family-1', userId: 'uuid-1234' }),
+      );
+    });
+
+    it('signs the new tokens from the freshly loaded user, not the stale decoded payload', async () => {
+      mockUserService.getUserById.mockResolvedValue(
+        buildUser({ email: 'changed@example.com' }),
       );
 
-      await expect(service.refreshTokens('expired.token')).rejects.toThrow(
+      await service.refreshTokens('old.refresh.token');
+
+      const payloads = mockJwtService.signAsync.mock.calls.map(
+        (c) => c[0] as { email: string },
+      );
+      expect(payloads.every((p) => p.email === 'changed@example.com')).toBe(
+        true,
+      );
+    });
+
+    it('rejects a token that was already used (reuse): revokes the family AND invalidates the sessions', async () => {
+      mockRefreshTokenService.rotate.mockResolvedValue({
+        status: 'reused',
+        token: storedToken({ usedAt: new Date(Date.now() - 60_000) }),
+      });
+
+      await expect(
+        service.refreshTokens('stolen.token'),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(mockRefreshTokenService.revokeFamily).toHaveBeenCalledWith(
+        'family-1',
+      );
+      expect(mockUserService.incrementTokenVersion).toHaveBeenCalledWith(
+        'uuid-1234',
+      );
+      expect(mockRefreshTokenService.create).not.toHaveBeenCalled();
+    });
+
+    it.each(['invalid'])(
+      'rejects an unknown/revoked/expired token (%s) without touching the family',
+      async (status) => {
+        mockRefreshTokenService.rotate.mockResolvedValue({ status });
+
+        await expect(service.refreshTokens('x')).rejects.toBeInstanceOf(
+          UnauthorizedException,
+        );
+        expect(mockRefreshTokenService.revokeFamily).not.toHaveBeenCalled();
+        expect(mockUserService.incrementTokenVersion).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['senza jti', { ...decoded, jti: undefined }],
+      ['senza fid', { ...decoded, fid: undefined }],
+      ['senza id', { ...decoded, id: undefined }],
+    ])(
+      'rejects a legacy/forged refresh token %s before hitting the store',
+      async (_label, payload) => {
+        mockJwtService.verifyAsync.mockResolvedValue(payload);
+
+        await expect(service.refreshTokens('legacy')).rejects.toBeInstanceOf(
+          UnauthorizedException,
+        );
+        expect(mockRefreshTokenService.rotate).not.toHaveBeenCalled();
+      },
+    );
+
+    it('throws UnauthorizedException when the refresh token is expired or invalid (bad signature)', async () => {
+      mockJwtService.verifyAsync.mockRejectedValue(new Error('jwt expired'));
+
+      await expect(service.refreshTokens('expired')).rejects.toBeInstanceOf(
         UnauthorizedException,
       );
-      await expect(service.refreshTokens('expired.token')).rejects.toThrow(
-        'Invalid or expired refresh token',
+      expect(mockRefreshTokenService.rotate).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when the user no longer exists', async () => {
+      mockUserService.getUserById.mockResolvedValue(null);
+
+      await expect(service.refreshTokens('t')).rejects.toBeInstanceOf(
+        UnauthorizedException,
       );
     });
 
-    it('should throw UnauthorizedException for a completely invalid refresh token', async () => {
-      mockJwtService.verifyAsync.mockRejectedValueOnce(
-        new Error('invalid token'),
+    it('throws UnauthorizedException when tokenVersion does not match (revoked session)', async () => {
+      mockUserService.getUserById.mockResolvedValue(
+        buildUser({ tokenVersion: 1 }),
       );
 
-      await expect(
-        service.refreshTokens('garbage.token.value'),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshTokens('t')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      expect(mockRefreshTokenService.create).not.toHaveBeenCalled();
     });
 
-    it('should throw UnauthorizedException when the user no longer exists in the DB (e.g. deleted)', async () => {
-      const decoded = {
-        id: 'deleted-uuid',
-        email: 'gone@example.com',
-        permissions: [],
-        tokenVersion: 0,
-      };
+    it('never leaks infrastructure errors as 500: any failure is a 401', async () => {
+      mockRefreshTokenService.rotate.mockRejectedValue(new Error('db down'));
 
-      mockJwtService.verifyAsync.mockResolvedValueOnce(decoded);
-      mockUserService.getUserById.mockResolvedValueOnce(null);
-
-      await expect(
-        service.refreshTokens('valid.refresh.token'),
-      ).rejects.toThrow(UnauthorizedException);
-      expect(mockUserService.getUserById).toHaveBeenCalledWith('deleted-uuid');
-    });
-
-    it('should throw UnauthorizedException when tokenVersion does not match (revoked session, e.g. after logout-all)', async () => {
-      const user = buildUser({ tokenVersion: 2 });
-      const decoded = {
-        id: user.id,
-        email: user.email,
-        permissions: [],
-        tokenVersion: 1,
-      };
-
-      mockJwtService.verifyAsync.mockResolvedValueOnce(decoded);
-      mockUserService.getUserById.mockResolvedValueOnce(user);
-
-      await expect(
-        service.refreshTokens('stale.refresh.token'),
-      ).rejects.toThrow(UnauthorizedException);
-      await expect(
-        service.refreshTokens('stale.refresh.token'),
-      ).rejects.toThrow('Invalid or expired refresh token');
+      await expect(service.refreshTokens('t')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
     });
   });
 
   // =========================================================================
-  // revokeSessions
+  // logout / revokeSessions
   // =========================================================================
 
+  describe('logout', () => {
+    it('revokes the family of the presented refresh token', async () => {
+      mockJwtService.verifyAsync.mockResolvedValue({
+        id: 'u1',
+        fid: 'family-9',
+      });
+
+      await service.logout('refresh.token');
+
+      expect(mockRefreshTokenService.revokeFamily).toHaveBeenCalledWith(
+        'family-9',
+      );
+      expect(mockJwtService.verifyAsync).toHaveBeenCalledWith(
+        'refresh.token',
+        expect.objectContaining({ ignoreExpiration: true }),
+      );
+    });
+
+    it('does nothing (and does not throw) without a cookie', async () => {
+      await expect(service.logout(undefined)).resolves.toBeUndefined();
+      expect(mockRefreshTokenService.revokeFamily).not.toHaveBeenCalled();
+    });
+
+    it('does not throw for a forged/garbage cookie and revokes nothing', async () => {
+      mockJwtService.verifyAsync.mockRejectedValue(
+        new Error('invalid signature'),
+      );
+
+      await expect(service.logout('garbage')).resolves.toBeUndefined();
+      expect(mockRefreshTokenService.revokeFamily).not.toHaveBeenCalled();
+    });
+  });
+
   describe('revokeSessions', () => {
-    it('should call userService.incrementTokenVersion with the given userId', async () => {
-      mockUserService.incrementTokenVersion.mockResolvedValueOnce(undefined);
+    it('bumps tokenVersion (kills access tokens) and revokes every refresh token of the user', async () => {
+      mockUserService.incrementTokenVersion.mockResolvedValue(undefined);
 
       await service.revokeSessions('uuid-1234');
 
       expect(mockUserService.incrementTokenVersion).toHaveBeenCalledWith(
+        'uuid-1234',
+      );
+      expect(mockRefreshTokenService.revokeAllForUser).toHaveBeenCalledWith(
         'uuid-1234',
       );
     });

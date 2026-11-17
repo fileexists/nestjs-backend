@@ -38,8 +38,10 @@ import { TokenPayload } from '../src/common/interfaces/jwt-payload.interface';
 import { req, ApiResponseBody } from './utils/http';
 import {
   AuthToken,
+  RefreshToken,
   MailService,
   authTokenRepositoryMock,
+  refreshTokenRepositoryMock,
   mailServiceMock,
 } from './utils/mocks';
 
@@ -169,6 +171,8 @@ describe('User & Permission Controllers (e2e)', () => {
       .useValue({ canActivate: () => Promise.resolve(true) })
       .overrideProvider(getRepositoryToken(AuthToken))
       .useValue(authTokenRepositoryMock())
+      .overrideProvider(getRepositoryToken(RefreshToken))
+      .useValue(refreshTokenRepositoryMock())
       .overrideProvider(MailService)
       .useValue(mailServiceMock())
       .compile();

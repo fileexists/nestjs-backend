@@ -9,6 +9,7 @@ import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
+import { GoogleAuthException } from './google-auth.exception';
 import { UserService } from '../user/user.service';
 import { PermissionService } from '../permission/permission.service';
 import { User } from '../../common/entities/user.entity';
@@ -22,6 +23,7 @@ import {
 const jwtService = { signAsync: jest.fn(), verifyAsync: jest.fn() };
 const userService = {
   getUserByEmail: jest.fn(),
+  getUserByGoogleId: jest.fn(),
   getUserById: jest.fn(),
   createUser: jest.fn(),
   updateUser: jest.fn(),
@@ -72,6 +74,7 @@ describe('AuthService - verifica email (A1)', () => {
     jest.resetAllMocks();
     resetAuthMocks();
     jwtService.signAsync.mockResolvedValue('signed.jwt');
+    userService.getUserByGoogleId.mockResolvedValue(null);
     permissionService.findPermission.mockResolvedValue({
       id: 'p1',
       name: 'USER',
@@ -294,6 +297,99 @@ describe('AuthService - verifica email (A1)', () => {
       const res = buildResponse();
 
       await service.handleGoogleCallback(google, res as unknown as Response);
+
+      expect(res.cookie).toHaveBeenCalledWith(
+        'access_token',
+        'signed.jwt',
+        expect.any(Object),
+      );
+    });
+  });
+
+  describe('handleGoogleCallback - confronto del googleId (B4)', () => {
+    it('rifiuta con 401 account_conflict se l account ha GIA un googleId diverso', async () => {
+      userService.getUserByEmail.mockResolvedValue(
+        buildUser({
+          googleId: 'g-original',
+          provider: 'google',
+          emailVerifiedAt: new Date(),
+        }),
+      );
+      const res = buildResponse();
+
+      const error = await service
+        .handleGoogleCallback(
+          { email: 'mario@example.com', googleId: 'g-OTHER' },
+          res as unknown as Response,
+        )
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(GoogleAuthException);
+      expect((error as GoogleAuthException).code).toBe('account_conflict');
+      expect((error as GoogleAuthException).getStatus()).toBe(401);
+      expect(userService.updateUser).not.toHaveBeenCalled();
+      expect(userService.claimUnverifiedForGoogle).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('non sovrascrive il googleId nemmeno per account con password (combined)', async () => {
+      userService.getUserByEmail.mockResolvedValue(
+        buildUser({
+          googleId: 'g-original',
+          password: 'hash',
+          provider: 'combined',
+          emailVerifiedAt: new Date(),
+        }),
+      );
+
+      await expect(
+        service.handleGoogleCallback(
+          { email: 'mario@example.com', googleId: 'g-OTHER' },
+          buildResponse() as unknown as Response,
+        ),
+      ).rejects.toBeInstanceOf(GoogleAuthException);
+      expect(userService.updateUser).not.toHaveBeenCalled();
+    });
+
+    it("cerca prima per googleId: se l utente esiste entra anche con un'email diversa, senza creare duplicati", async () => {
+      userService.getUserByGoogleId.mockResolvedValue(
+        buildUser({
+          email: 'old@example.com',
+          googleId: 'g-123',
+          provider: 'google',
+          emailVerifiedAt: new Date(),
+        }),
+      );
+      const res = buildResponse();
+
+      await service.handleGoogleCallback(
+        { email: 'new@example.com', googleId: 'g-123' },
+        res as unknown as Response,
+      );
+
+      expect(userService.getUserByEmail).not.toHaveBeenCalled();
+      expect(userService.createUser).not.toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalledWith(
+        'access_token',
+        'signed.jwt',
+        expect.any(Object),
+      );
+    });
+
+    it('con lo stesso googleId in arrivo l account entra normalmente', async () => {
+      userService.getUserByEmail.mockResolvedValue(
+        buildUser({
+          googleId: 'g-123',
+          provider: 'google',
+          emailVerifiedAt: new Date(),
+        }),
+      );
+      const res = buildResponse();
+
+      await service.handleGoogleCallback(
+        { email: 'mario@example.com', googleId: 'g-123' },
+        res as unknown as Response,
+      );
 
       expect(res.cookie).toHaveBeenCalledWith(
         'access_token',

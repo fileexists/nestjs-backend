@@ -3,28 +3,35 @@ import {
   ForbiddenException,
   HttpStatus,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { randomBytes, randomUUID } from 'crypto';
 import { CookieOptions, Response } from 'express';
 import type { StringValue } from 'ms';
 import { UserService } from '../user/user.service';
 import { PermissionService } from '../permission/permission.service';
 import { AccountService } from './account.service';
 import { AuthTokenService } from './auth-token.service';
+import { RefreshTokenService } from './refresh-token.service';
 import { parseDurationMs } from '../../common/utils/duration';
+import { GoogleAuthException } from './google-auth.exception';
 import { User } from '../../common/entities/user.entity';
 import { UserAuthDTO } from '../../common/dto/register-user.dto';
 import { TokenPayload } from '../../common/interfaces/jwt-payload.interface';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly jwtSecret: string;
   private readonly refreshTokenSecret: string;
   private readonly jwtExpiration: string;
   private readonly refreshTokenExpiration: string;
+  /** Tolleranza (ms) per il riuso di un refresh token appena ruotato (richieste parallele). 0 = nessuna. */
+  private readonly reuseGraceMs: number;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -33,6 +40,7 @@ export class AuthService {
     private readonly permissionService: PermissionService,
     private readonly authTokenService: AuthTokenService,
     private readonly accountService: AccountService,
+    private readonly refreshTokenService: RefreshTokenService,
   ) {
     const jwtSecret = this.configService.get<string>('JWT_SECRET');
     const refreshSecret = this.configService.get<string>(
@@ -50,6 +58,10 @@ export class AuthService {
       this.configService.get<string>('JWT_EXPIRATION') ?? '15m';
     this.refreshTokenExpiration =
       this.configService.get<string>('REFRESH_TOKEN_EXPIRATION') ?? '7d';
+    this.reuseGraceMs =
+      Number(
+        this.configService.get<number>('REFRESH_REUSE_GRACE_SECONDS') ?? 0,
+      ) * 1000;
   }
 
   async hashPassword(password: string): Promise<string> {
@@ -63,72 +75,176 @@ export class AuthService {
     return bcrypt.compare(plainPassword, hashedPassword);
   }
 
+  /** Access token: porta `tokenVersion`, cosi' logout-all, reuse e reset password lo invalidano subito. */
   async generateJwtToken(user: TokenPayload): Promise<string> {
-    return this.jwtService.signAsync(
-      { id: user.id, email: user.email },
-      { secret: this.jwtSecret, expiresIn: this.jwtExpiration as StringValue },
-    );
-  }
-
-  async generateRefreshToken(user: TokenPayload): Promise<string> {
     return this.jwtService.signAsync(
       {
         id: user.id,
         email: user.email,
-        tokenVersion: user.tokenVersion,
+        tokenVersion: user.tokenVersion ?? 0,
+      },
+      { secret: this.jwtSecret, expiresIn: this.jwtExpiration as StringValue },
+    );
+  }
+
+  /**
+   * Emette un refresh token e lo registra in `refresh_tokens` (solo l'hash del jti).
+   * Senza `familyId` inizia una nuova sessione (login); alla rotazione si passa
+   * quello della sessione esistente.
+   */
+  async generateRefreshToken(
+    user: TokenPayload,
+    familyId: string = randomUUID(),
+  ): Promise<string> {
+    const jti = randomBytes(32).toString('base64url');
+    const token = await this.jwtService.signAsync(
+      {
+        id: user.id,
+        email: user.email,
+        tokenVersion: user.tokenVersion ?? 0,
+        fid: familyId,
       },
       {
         secret: this.refreshTokenSecret,
         expiresIn: this.refreshTokenExpiration as StringValue,
+        jwtid: jti,
       },
     );
+    await this.refreshTokenService.create({
+      userId: user.id as string,
+      jti,
+      familyId,
+      expiresAt: new Date(
+        Date.now() + parseDurationMs(this.refreshTokenExpiration),
+      ),
+    });
+    return token;
   }
 
   async verifyJwtToken(token: string | undefined): Promise<TokenPayload> {
     try {
       if (!token) throw new Error('No token provided');
-      return await this.jwtService.verifyAsync<TokenPayload>(token, {
+      const payload = await this.jwtService.verifyAsync<TokenPayload>(token, {
         secret: this.jwtSecret,
       });
+      await this.assertSessionCurrent(payload);
+      return payload;
     } catch {
       throw new UnauthorizedException('Invalid or expired token');
     }
   }
 
-  async refreshTokens(
-    refreshToken: string,
-  ): Promise<{ token: string; refreshToken: string }> {
-    try {
-      const decoded = await this.jwtService.verifyAsync<TokenPayload>(
-        refreshToken,
-        {
-          secret: this.refreshTokenSecret,
-        },
-      );
-
-      if (!decoded.id) {
-        throw new UnauthorizedException('Invalid or expired refresh token');
-      }
-
-      const user = await this.userService.getUserById(decoded.id);
-      if (!user) {
-        throw new UnauthorizedException('Invalid or expired refresh token');
-      }
-
-      if ((decoded.tokenVersion ?? 0) !== user.tokenVersion) {
-        throw new UnauthorizedException('Invalid or expired refresh token');
-      }
-
-      const newAccessToken = await this.generateJwtToken(user);
-      const newRefreshToken = await this.generateRefreshToken(user);
-      return { token: newAccessToken, refreshToken: newRefreshToken };
-    } catch {
-      throw new UnauthorizedException('Invalid or expired refresh token');
+  /**
+   * Un access token firmato correttamente vale solo finche' la sessione e' quella
+   * attuale: se l'utente non esiste piu' o `tokenVersion` e' cambiato (logout-all,
+   * reuse detection, reset password) il token e' rifiutato subito, senza aspettare la scadenza.
+   */
+  async assertSessionCurrent(payload: TokenPayload): Promise<void> {
+    const state = payload.id
+      ? await this.userService.getAuthState(payload.id)
+      : null;
+    if (
+      !state ||
+      payload.tokenVersion === undefined ||
+      payload.tokenVersion !== state.tokenVersion
+    ) {
+      throw new UnauthorizedException('User is not authenticated.');
     }
   }
 
+  /**
+   * Rotazione: il refresh token presentato viene marcato come usato e ne esce
+   * uno nuovo della stessa famiglia. Se arriva un token GIA' usato (furto/replay)
+   * si revoca l'intera famiglia e si invalidano le sessioni dell'utente.
+   */
+  async refreshTokens(
+    refreshToken: string,
+  ): Promise<{ token: string; refreshToken: string }> {
+    const invalid = () =>
+      new UnauthorizedException('Invalid or expired refresh token');
+
+    try {
+      const decoded = await this.jwtService.verifyAsync<TokenPayload>(
+        refreshToken,
+        { secret: this.refreshTokenSecret },
+      );
+      // Un refresh token senza jti/fid e' di prima della rotazione: non e' piu' valido.
+      if (!decoded.id || !decoded.jti || !decoded.fid) throw invalid();
+
+      const rotation = await this.refreshTokenService.rotate(decoded.jti);
+      if (rotation.status === 'reused') {
+        const usedAt = rotation.token.usedAt?.getTime() ?? 0;
+        if (Date.now() - usedAt >= this.reuseGraceMs) {
+          await this.refreshTokenService.revokeFamily(rotation.token.familyId);
+          await this.userService.incrementTokenVersion(rotation.token.userId);
+          this.logger.warn(
+            `Riuso di un refresh token rilevato (utente ${rotation.token.userId}): famiglia revocata e sessioni invalidate`,
+          );
+        }
+        throw invalid();
+      }
+      if (rotation.status !== 'rotated') throw invalid();
+
+      const user = await this.userService.getUserById(decoded.id);
+      if (
+        !user ||
+        user.id !== rotation.token.userId ||
+        (decoded.tokenVersion ?? 0) !== user.tokenVersion
+      ) {
+        throw invalid();
+      }
+
+      const newAccessToken = await this.generateJwtToken(user);
+      const newRefreshToken = await this.generateRefreshToken(
+        user,
+        rotation.token.familyId,
+      );
+      return { token: newAccessToken, refreshToken: newRefreshToken };
+    } catch (error) {
+      if (!(error instanceof UnauthorizedException)) {
+        this.logger.error(
+          `Refresh fallito: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      throw invalid();
+    }
+  }
+
+  /** Revoca TUTTE le sessioni dell'utente: refresh token e access token gia' emessi. */
   async revokeSessions(userId: string): Promise<void> {
     await this.userService.incrementTokenVersion(userId);
+    await this.refreshTokenService.revokeAllForUser(userId);
+  }
+
+  /**
+   * Logout: revoca la sessione del refresh token corrente (non solo i cookie).
+   * Un cookie assente o non valido non e' un errore: non c'e' nulla da revocare.
+   */
+  async logout(refreshToken: string | undefined): Promise<void> {
+    if (!refreshToken) return;
+    try {
+      // Anche un token scaduto identifica la sessione da chiudere; la firma resta verificata.
+      const decoded = await this.jwtService.verifyAsync<TokenPayload>(
+        refreshToken,
+        { secret: this.refreshTokenSecret, ignoreExpiration: true },
+      );
+      if (decoded.fid) {
+        await this.refreshTokenService.revokeFamily(decoded.fid);
+      }
+    } catch {
+      // cookie non valido: nessuna sessione da revocare
+    }
+  }
+
+  setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
+    const { accessTokenOptions, refreshTokenOptions } = this.getCookieOptions();
+    res.cookie('access_token', accessToken, accessTokenOptions);
+    res.cookie('refresh_token', refreshToken, refreshTokenOptions);
+  }
+
+  clearAuthCookies(res: Response): void {
+    res.clearCookie('access_token', { path: '/' });
+    res.clearCookie('refresh_token', { path: '/' });
   }
 
   getCookieOptions(): {
@@ -201,12 +317,11 @@ export class AuthService {
       );
     }
 
-    const token = await this.generateJwtToken(user);
-    const refreshToken = await this.generateRefreshToken(user);
-    const { accessTokenOptions, refreshTokenOptions } = this.getCookieOptions();
-
-    res.cookie('access_token', token, accessTokenOptions);
-    res.cookie('refresh_token', refreshToken, refreshTokenOptions);
+    this.setAuthCookies(
+      res,
+      await this.generateJwtToken(user),
+      await this.generateRefreshToken(user),
+    );
 
     if (user.provider === 'google') {
       await this.userService.updateUser(user.id, { provider: 'combined' });
@@ -221,12 +336,11 @@ export class AuthService {
   ): Promise<void> {
     const user = await this.resolveGoogleUser(googleUser);
 
-    const token = await this.generateJwtToken(user);
-    const refreshToken = await this.generateRefreshToken(user);
-    const { accessTokenOptions, refreshTokenOptions } = this.getCookieOptions();
-
-    res.cookie('access_token', token, accessTokenOptions);
-    res.cookie('refresh_token', refreshToken, refreshTokenOptions);
+    this.setAuthCookies(
+      res,
+      await this.generateJwtToken(user),
+      await this.generateRefreshToken(user),
+    );
     res.json({ message: 'Authentication with google was successful.' });
   }
 
@@ -241,7 +355,18 @@ export class AuthService {
     email: string;
     googleId: string;
   }): Promise<User> {
-    let user = await this.userService.getUserByEmail(googleUser.email);
+    // L'identita' Google (sub) prevale sull'email: l'utente puo' cambiare email su Google.
+    let user = await this.userService.getUserByGoogleId(googleUser.googleId);
+    if (!user) {
+      user = await this.userService.getUserByEmail(googleUser.email);
+      // Stessa email ma un altro account Google: non si entra e non si sovrascrive nulla.
+      if (user?.googleId && user.googleId !== googleUser.googleId) {
+        throw new GoogleAuthException(
+          'account_conflict',
+          'This account is already linked to a different Google account.',
+        );
+      }
+    }
 
     if (!user) {
       const userRole = await this.permissionService.findPermission({

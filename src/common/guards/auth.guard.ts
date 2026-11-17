@@ -46,6 +46,7 @@ export class AuthGuard implements CanActivate {
       const payload = await this.jwtService.verifyAsync<TokenPayload>(token, {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
+      await this.authService.assertSessionCurrent(payload);
       request.user = payload;
       return true;
     } catch (error: unknown) {
@@ -78,11 +79,11 @@ export class AuthGuard implements CanActivate {
       const { token: newAccessToken, refreshToken: newRefreshToken } =
         await this.authService.refreshTokens(refreshToken);
 
-      const { accessTokenOptions, refreshTokenOptions } =
-        this.authService.getCookieOptions();
-
-      response.cookie('access_token', newAccessToken, accessTokenOptions);
-      response.cookie('refresh_token', newRefreshToken, refreshTokenOptions);
+      this.authService.setAuthCookies(
+        response,
+        newAccessToken,
+        newRefreshToken,
+      );
 
       const decoded = await this.authService.verifyJwtToken(newAccessToken);
       request.user = decoded;

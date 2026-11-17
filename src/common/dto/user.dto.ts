@@ -1,8 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsOptional, IsString, IsUUID, Length } from 'class-validator';
 import { Permission } from '../entities/permission.entity';
+import { NormalizeEmail } from './normalize-email.decorator';
 
 export class CreateUserDto {
+  @NormalizeEmail()
   @IsEmail()
   email: string;
 
@@ -26,6 +28,7 @@ export class CreateUserDto {
 
 export class UpdateUserDto {
   @IsOptional()
+  @NormalizeEmail()
   @IsEmail()
   email?: string;
 

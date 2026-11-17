@@ -90,6 +90,59 @@ describe('UserService', () => {
     });
   });
 
+  describe('normalizzazione email (B2)', () => {
+    it('getUserByEmail cerca sempre con l email normalizzata', async () => {
+      mockUserRepository.findOne.mockResolvedValue(null);
+
+      await service.getUserByEmail('  Mario.Rossi@Example.COM ');
+
+      expect(mockUserRepository.findOne).toHaveBeenCalledWith({
+        where: { email: 'mario.rossi@example.com' },
+        relations: { permissions: true },
+      });
+    });
+
+    it('createUser salva l email normalizzata', async () => {
+      mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
+      mockUserRepository.save.mockImplementation((u: User) =>
+        Promise.resolve(u),
+      );
+
+      await service.createUser({
+        email: ' Mario@Example.com ',
+        provider: 'local',
+      });
+
+      expect(mockUserRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'mario@example.com' }),
+      );
+    });
+
+    it('createUser senza email non la inventa', async () => {
+      mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
+      mockUserRepository.save.mockImplementation((u: User) =>
+        Promise.resolve(u),
+      );
+
+      await service.createUser({ provider: 'local' });
+
+      expect(mockUserRepository.create).toHaveBeenCalledWith({
+        provider: 'local',
+      });
+    });
+
+    it('updateUser normalizza l email quando viene modificata', async () => {
+      mockUserRepository.update.mockResolvedValue({ affected: 1 });
+      mockUserRepository.findOne.mockResolvedValue(buildUser());
+
+      await service.updateUser('uuid-1234', { email: 'NEW@Example.com' });
+
+      expect(mockUserRepository.update).toHaveBeenCalledWith('uuid-1234', {
+        email: 'new@example.com',
+      });
+    });
+  });
+
   describe('getUserByEmail', () => {
     it('should return a user when the email exists', async () => {
       const user = buildUser();

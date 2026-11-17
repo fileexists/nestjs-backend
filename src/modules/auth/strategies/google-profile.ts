@@ -1,4 +1,5 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { GoogleAuthException } from '../google-auth.exception';
+import { normalizeEmail } from '../../../common/utils/email';
 
 /** Parte del profilo Passport (passport-google-oauth20, formato OpenID) che ci serve. */
 export interface GoogleProfileLike {
@@ -25,21 +26,28 @@ export function mapGoogleProfile(
   profile: GoogleProfileLike,
 ): MappedGoogleProfile {
   if (!profile.id) {
-    throw new UnauthorizedException('Google profile has no account id.');
+    throw new GoogleAuthException(
+      'failed',
+      'Google profile has no account id.',
+    );
   }
   const entry = profile.emails?.find((e) => !!e.value);
   if (!entry?.value) {
-    throw new UnauthorizedException('Google account has no email address.');
+    throw new GoogleAuthException(
+      'email_missing',
+      'Google account has no email address.',
+    );
   }
   const verified = entry.verified ?? profile._json?.email_verified;
   if (!isTrue(verified)) {
-    throw new UnauthorizedException(
+    throw new GoogleAuthException(
+      'email_unverified',
       'The email address of this Google account is not verified.',
     );
   }
   return {
     googleId: profile.id,
-    email: entry.value,
+    email: normalizeEmail(entry.value),
     name: profile.displayName,
   };
 }

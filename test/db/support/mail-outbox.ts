@@ -23,8 +23,10 @@ export class MailOutbox {
   }
 
   to(address: string, kind?: MailKind): SentMail[] {
+    // Il sistema spedisce all'indirizzo normalizzato: i test possono usare qualsiasi forma.
+    const normalized = address.trim().toLowerCase();
     return this.sent.filter(
-      (m) => m.to === address && (kind === undefined || m.kind === kind),
+      (m) => m.to === normalized && (kind === undefined || m.kind === kind),
     );
   }
 

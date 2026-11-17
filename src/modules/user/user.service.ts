@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { User } from '../../common/entities/user.entity';
 import { Permission } from '../../common/entities/permission.entity';
+import { normalizeEmail } from '../../common/utils/email';
 
 export interface PaginatedUsers {
   data: User[];
@@ -19,13 +20,22 @@ export class UserService {
   ) {}
 
   async createUser(data: Partial<User>): Promise<User> {
-    const user = this.userRepository.create(data);
+    const user = this.userRepository.create(
+      data.email ? { ...data, email: normalizeEmail(data.email) } : data,
+    );
     return this.userRepository.save(user);
   }
 
   async getUserByEmail(email: string): Promise<User | null> {
     return this.userRepository.findOne({
-      where: { email },
+      where: { email: normalizeEmail(email) },
+      relations: { permissions: true },
+    });
+  }
+
+  async getUserByGoogleId(googleId: string): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { googleId },
       relations: { permissions: true },
     });
   }
@@ -35,6 +45,15 @@ export class UserService {
       where: { id },
       relations: { permissions: true },
     });
+  }
+
+  /** Stato minimo per validare una sessione a ogni richiesta (una query per chiave primaria). */
+  async getAuthState(id: string): Promise<{ tokenVersion: number } | null> {
+    const user = await this.userRepository.findOne({
+      where: { id },
+      select: { id: true, tokenVersion: true },
+    });
+    return user ? { tokenVersion: user.tokenVersion } : null;
   }
 
   async getUserPermissions(id: string): Promise<Permission[] | null> {
@@ -56,7 +75,10 @@ export class UserService {
   }
 
   async updateUser(id: string, data: Partial<User>): Promise<User> {
-    await this.userRepository.update(id, data);
+    await this.userRepository.update(
+      id,
+      data.email ? { ...data, email: normalizeEmail(data.email) } : data,
+    );
     const updated = await this.userRepository.findOne({ where: { id } });
     if (!updated) {
       throw new NotFoundException('User not found');

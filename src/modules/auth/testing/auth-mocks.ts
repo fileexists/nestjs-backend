@@ -1,6 +1,7 @@
 import type { Provider } from '@nestjs/common';
 import { AccountService } from '../account.service';
 import { AuthTokenService } from '../auth-token.service';
+import { RefreshTokenService } from '../refresh-token.service';
 import { MailService } from '../../mail/mail.service';
 
 /**
@@ -13,6 +14,14 @@ export const mockAuthTokenService = {
   consume: jest.fn(),
   findLatestActive: jest.fn(),
   invalidateAll: jest.fn(),
+  deleteExpired: jest.fn(),
+};
+
+export const mockRefreshTokenService = {
+  create: jest.fn(),
+  rotate: jest.fn(),
+  revokeFamily: jest.fn(),
+  revokeAllForUser: jest.fn(),
   deleteExpired: jest.fn(),
 };
 
@@ -29,6 +38,7 @@ export const mockAccountService = {
 export function extraAuthProviders(): Provider[] {
   return [
     { provide: AuthTokenService, useValue: mockAuthTokenService },
+    { provide: RefreshTokenService, useValue: mockRefreshTokenService },
     { provide: MailService, useValue: mockMailService },
     { provide: AccountService, useValue: mockAccountService },
   ];
@@ -37,6 +47,7 @@ export function extraAuthProviders(): Provider[] {
 export function resetAuthMocks(): void {
   for (const mock of [
     mockAuthTokenService,
+    mockRefreshTokenService,
     mockMailService,
     mockAccountService,
   ]) {

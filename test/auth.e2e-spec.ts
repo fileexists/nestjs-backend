@@ -30,12 +30,17 @@ import { Permission } from '../src/common/entities/permission.entity';
 import { AuthService } from '../src/modules/auth/auth.service';
 import { AuthGuard } from '../src/common/guards/auth.guard';
 import { PermissionsGuard } from '../src/common/guards/permissions.guard';
-import { GoogleOAuthGuard } from '../src/common/guards/google-oauth.guard';
+import {
+  GoogleCallbackGuard,
+  GoogleOAuthGuard,
+} from '../src/common/guards/google-oauth.guard';
 import { req, ApiResponseBody } from './utils/http';
 import {
   AuthToken,
+  RefreshToken,
   MailService,
   authTokenRepositoryMock,
+  refreshTokenRepositoryMock,
   mailServiceMock,
 } from './utils/mocks';
 
@@ -200,8 +205,12 @@ async function createGoogleOverrideApp(
     .useValue({ canActivate: () => Promise.resolve(true) })
     .overrideGuard(GoogleOAuthGuard)
     .useValue(googleGuardStub)
+    .overrideGuard(GoogleCallbackGuard)
+    .useValue(googleGuardStub)
     .overrideProvider(getRepositoryToken(AuthToken))
     .useValue(authTokenRepositoryMock())
+    .overrideProvider(getRepositoryToken(RefreshToken))
+    .useValue(refreshTokenRepositoryMock())
     .overrideProvider(MailService)
     .useValue(mailServiceMock())
     .compile();
@@ -240,6 +249,8 @@ describe('AuthController (e2e)', () => {
       .useValue({ canActivate: () => Promise.resolve(true) })
       .overrideProvider(getRepositoryToken(AuthToken))
       .useValue(authTokenRepositoryMock())
+      .overrideProvider(getRepositoryToken(RefreshToken))
+      .useValue(refreshTokenRepositoryMock())
       .overrideProvider(MailService)
       .useValue(mailServiceMock())
       .compile();
@@ -475,6 +486,7 @@ describe('AuthController (e2e)', () => {
       const token = buildValidAccessToken(app, {
         id: LOCAL_USER.id,
         email: LOCAL_USER.email,
+        tokenVersion: LOCAL_USER.tokenVersion,
         permissions: LOCAL_USER.permissions,
       });
 

@@ -109,3 +109,44 @@ describe('RegisterUserDTO', () => {
     expect(errors.some((e) => e.property === 'password')).toBe(true);
   });
 });
+
+describe('normalizzazione email nei DTO (B2)', () => {
+  it.each([
+    ['UserAuthDTO', UserAuthDTO, { password: 'Pass1234!' }],
+    ['RegisterUserDTO', RegisterUserDTO, { password: 'Pass1234!' }],
+  ])(
+    '%s: trim + minuscolo prima della validazione',
+    async (_name, Dto, extra) => {
+      const dto = plainToInstance(Dto, {
+        email: '  Mario.Rossi@Example.COM ',
+        ...extra,
+      });
+
+      expect(dto.email).toBe('mario.rossi@example.com');
+      expect(await validate(dto)).toHaveLength(0);
+    },
+  );
+
+  it('un valore non stringa non viene toccato e fallisce la validazione come prima', async () => {
+    const dto = plainToInstance(RegisterUserDTO, {
+      email: 12345,
+      password: 'Pass1234!',
+    });
+
+    expect(dto.email).toBe(12345);
+    expect((await validate(dto)).some((e) => e.property === 'email')).toBe(
+      true,
+    );
+  });
+
+  it('spazi interni restano un errore (non vengono "aggiustati")', async () => {
+    const dto = plainToInstance(RegisterUserDTO, {
+      email: 'ma rio@example.com',
+      password: 'Pass1234!',
+    });
+
+    expect((await validate(dto)).some((e) => e.property === 'email')).toBe(
+      true,
+    );
+  });
+});

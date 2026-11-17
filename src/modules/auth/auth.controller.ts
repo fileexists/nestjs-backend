@@ -33,7 +33,10 @@ import {
   RegisterUserDTO,
 } from '../../common/dto/register-user.dto';
 import { Public } from '../../common/decorators/public.decorator';
-import { GoogleOAuthGuard } from '../../common/guards/google-oauth.guard';
+import {
+  GoogleCallbackGuard,
+  GoogleOAuthGuard,
+} from '../../common/guards/google-oauth.guard';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -46,12 +49,35 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Log out a user and clear auth cookies' })
+  @ApiOperation({
+    summary: 'Log out: revoke the current refresh token and clear auth cookies',
+  })
   @ApiOkResponse({ description: 'User logged out successfully' })
-  logout(@Res() res: Response): void {
-    res.clearCookie('access_token', { path: '/' });
-    res.clearCookie('refresh_token', { path: '/' });
+  async logout(@Req() req: Request, @Res() res: Response): Promise<void> {
+    await this.authService.logout(
+      req.cookies?.refresh_token as string | undefined,
+    );
+    this.authService.clearAuthCookies(res);
     res.json({ message: 'User has been logged out successfully.' });
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Rotate the refresh token and issue a new access token',
+  })
+  @ApiOkResponse({ description: 'Tokens refreshed (new cookies set)' })
+  @ApiUnauthorizedResponse({ description: 'Invalid, expired or reused token' })
+  async refresh(@Req() req: Request, @Res() res: Response): Promise<void> {
+    const refreshToken = req.cookies?.refresh_token as string | undefined;
+    if (!refreshToken) {
+      throw new UnauthorizedException('User is not authenticated.');
+    }
+    const { token, refreshToken: rotated } =
+      await this.authService.refreshTokens(refreshToken);
+    this.authService.setAuthCookies(res, token, rotated);
+    res.json({ message: 'Tokens refreshed.' });
   }
 
   @Post('logout-all')
@@ -63,8 +89,7 @@ export class AuthController {
   async logoutAll(@Req() req: Request, @Res() res: Response): Promise<void> {
     const user = req.user as { id: string };
     await this.authService.revokeSessions(user.id);
-    res.clearCookie('access_token', { path: '/' });
-    res.clearCookie('refresh_token', { path: '/' });
+    this.authService.clearAuthCookies(res);
     res.json({ message: 'All sessions have been revoked.' });
   }
 
@@ -152,11 +177,7 @@ export class AuthController {
       try {
         const { token: newAccessToken, refreshToken: newRefreshToken } =
           await this.authService.refreshTokens(refreshToken!);
-        const { accessTokenOptions, refreshTokenOptions } =
-          this.authService.getCookieOptions();
-
-        res.cookie('access_token', newAccessToken, accessTokenOptions);
-        res.cookie('refresh_token', newRefreshToken, refreshTokenOptions);
+        this.authService.setAuthCookies(res, newAccessToken, newRefreshToken);
 
         await this.authService.verifyJwtToken(newAccessToken);
         res.json({ success: true });
@@ -175,7 +196,7 @@ export class AuthController {
   googleAuth(): void {}
 
   @Get('google/callback')
-  @UseGuards(GoogleOAuthGuard)
+  @UseGuards(GoogleCallbackGuard)
   @ApiOperation({ summary: 'Google OAuth callback handler' })
   @ApiOkResponse({ description: 'Google authentication successful' })
   @ApiUnauthorizedResponse({ description: 'Authentication failed' })

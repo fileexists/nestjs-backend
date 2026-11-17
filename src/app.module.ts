@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import * as Joi from 'joi';
 import { join } from 'path';
 import { DURATION_PATTERN } from './common/utils/duration';
@@ -30,6 +31,13 @@ import { AppController } from './app.controller';
         REFRESH_TOKEN_SECRET: Joi.string().min(16).required(),
         JWT_EXPIRATION: Joi.string().default('15m'),
         REFRESH_TOKEN_EXPIRATION: Joi.string().default('7d'),
+        // Tolleranza (secondi) per il riuso di un refresh token appena ruotato (richieste
+        // parallele del browser). 0 = ogni riuso e' trattato come furto.
+        REFRESH_REUSE_GRACE_SECONDS: Joi.number()
+          .integer()
+          .min(0)
+          .max(60)
+          .default(0),
         DATABASE_URL: Joi.string().required(),
         // Applica le migrazioni all'avvio (default: no, si lanciano con `yarn migration:run`).
         DB_MIGRATIONS_RUN: Joi.boolean().default(false),
@@ -86,6 +94,7 @@ import { AppController } from './app.controller';
         logging: configService.get<string>('NODE_ENV') === 'development',
       }),
     }),
+    ScheduleModule.forRoot(),
     AuthModule,
     UserModule,
     PermissionModule,

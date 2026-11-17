@@ -4,6 +4,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthToken } from '../../common/entities/auth-token.entity';
+import { RefreshToken } from '../../common/entities/refresh-token.entity';
+import { AuthCleanupService } from './auth-cleanup.service';
+import { RefreshTokenService } from './refresh-token.service';
 import { AccountService } from './account.service';
 import { AuthTokenService } from './auth-token.service';
 import { MailModule } from '../mail/mail.module';
@@ -30,12 +33,19 @@ import type { StringValue } from 'ms';
         },
       }),
     }),
-    TypeOrmModule.forFeature([AuthToken]),
+    TypeOrmModule.forFeature([AuthToken, RefreshToken]),
     MailModule,
     UserModule,
     PermissionModule,
   ],
-  providers: [AuthService, AccountService, AuthTokenService, GoogleStrategy],
+  providers: [
+    AuthService,
+    AccountService,
+    AuthTokenService,
+    RefreshTokenService,
+    AuthCleanupService,
+    GoogleStrategy,
+  ],
   controllers: [AuthController],
   exports: [AuthService],
 })

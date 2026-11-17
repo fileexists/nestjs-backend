@@ -13,6 +13,15 @@ describe('mapGoogleProfile (A1: solo email verificate da Google)', () => {
     ).toEqual({ googleId: 'g-1', email: 'mario@example.com', name: 'Mario' });
   });
 
+  it('normalizza l email (minuscolo, senza spazi): Google puo restituirla in maiuscolo', () => {
+    expect(
+      mapGoogleProfile({
+        ...base,
+        emails: [{ value: ' Mario.ROSSI@Example.com ', verified: true }],
+      }).email,
+    ).toBe('mario.rossi@example.com');
+  });
+
   it('accetta email_verified espresso come stringa "true" (formati legacy)', () => {
     expect(
       mapGoogleProfile({
