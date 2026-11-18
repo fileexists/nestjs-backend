@@ -1,8 +1,8 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
 /**
- * D2 - Blocco progressivo per account: un record per identificatore (SHA-256 dell'email
- * normalizzata) con errori consecutivi, livello di blocco e scadenza del blocco.
+ * D2 - Progressive per-account lock: one record per identifier (SHA-256 of the normalized
+ * email) with consecutive failures, lock level and lock expiry.
  */
 export class CreateLoginAttempts1794875670764 implements MigrationInterface {
     name = 'CreateLoginAttempts1794875670764'

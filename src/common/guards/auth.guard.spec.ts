@@ -222,7 +222,7 @@ describe('AuthGuard', () => {
       expect(mockAuthService.assertSessionCurrent).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'uuid-1' }),
       );
-      // sessione revocata: non si tenta nemmeno un refresh silenzioso
+      // revoked session: not even a silent refresh is attempted
       expect(mockAuthService.refreshTokens).not.toHaveBeenCalled();
     });
 

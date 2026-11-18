@@ -1,10 +1,10 @@
 /**
- * A1 - La password si sceglie alla CONFERMA dell'email.
+ * A1 - The password is chosen at email CONFIRMATION.
  *
- * Senza questo, chi registra l'email di un altro con una password sua (pre-hijacking)
- * otterrebbe un account verificato appena la vittima clicca il link ricevuto: la password
- * dell'attaccante resterebbe valida. Chi conferma (il proprietario della casella) imposta
- * la propria password, che sostituisce quella inserita alla registrazione.
+ * Without this, whoever registers someone else's email with a password of their own (pre-hijacking)
+ * would get a verified account as soon as the victim clicks the link they receive: the attacker's
+ * password would stay valid. Whoever confirms (the owner of the mailbox) sets their own
+ * password, which replaces the one entered at registration.
  */
 import { createHarness, Harness } from './support/harness';
 import { PASSWORD, http, login, register, sql, userRow } from './support/api';
@@ -13,7 +13,7 @@ const VICTIM = 'victim@example.com';
 const ATTACKER_PASSWORD = 'Attacker-Passw0rd!';
 const VICTIM_PASSWORD = 'Victim-Chosen-Passw0rd!';
 
-describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
+describe('A1 - password at confirmation (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -31,7 +31,7 @@ describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
       .post('/api/auth/verify-email')
       .send(password === undefined ? { token } : { token, password });
 
-  it("pre-hijacking: la vittima conferma con la sua password e quella dell'attaccante smette di valere", async () => {
+  it("pre-hijacking: the victim confirms with their own password and the attacker's stops working", async () => {
     await register(h, VICTIM, ATTACKER_PASSWORD);
     const token = h.mail.lastToken(VICTIM, 'verification');
 
@@ -41,7 +41,7 @@ describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
     expect((await login(h, VICTIM, VICTIM_PASSWORD)).status).toBe(200);
   });
 
-  it("l'utente che si e registrato da solo puo riconfermare la stessa password e accedere", async () => {
+  it('a user who registered on their own can confirm the same password again and sign in', async () => {
     await register(h, VICTIM, PASSWORD);
     const token = h.mail.lastToken(VICTIM, 'verification');
 
@@ -49,7 +49,7 @@ describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
     expect((await login(h, VICTIM, PASSWORD)).status).toBe(200);
   });
 
-  it('senza password la conferma e rifiutata e il token resta valido', async () => {
+  it('without a password the confirmation is rejected and the token stays valid', async () => {
     await register(h, VICTIM, ATTACKER_PASSWORD);
     const token = h.mail.lastToken(VICTIM, 'verification');
 
@@ -60,10 +60,10 @@ describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
   });
 
   it.each([
-    ['troppo corta', 'short'],
-    ['oltre 72 caratteri', 'x'.repeat(73)],
-    ['oltre 72 byte', '€'.repeat(25)],
-  ])('password %s: 400 e il token non viene consumato', async (_label, bad) => {
+    ['too short', 'short'],
+    ['over 72 characters', 'x'.repeat(73)],
+    ['over 72 bytes', '€'.repeat(25)],
+  ])('password %s: 400 and the token is not consumed', async (_label, bad) => {
     await register(h, VICTIM, ATTACKER_PASSWORD);
     const token = h.mail.lastToken(VICTIM, 'verification');
 
@@ -71,7 +71,7 @@ describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
     expect((await confirm(token, VICTIM_PASSWORD)).status).toBe(200);
   });
 
-  it('nel database finisce solo un hash bcrypt della nuova password', async () => {
+  it('only a bcrypt hash of the new password ends up in the database', async () => {
     await register(h, VICTIM, ATTACKER_PASSWORD);
     await confirm(h.mail.lastToken(VICTIM, 'verification'), VICTIM_PASSWORD);
 
@@ -81,7 +81,7 @@ describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
     expect(row?.emailVerifiedAt).not.toBeNull();
   });
 
-  it('con token non valido risponde 400 come con password errata nel formato (nessuna differenza osservabile)', async () => {
+  it('with an invalid token answers 400 just as with a password of the wrong format (no observable difference)', async () => {
     const unknown = await confirm('x'.repeat(43), VICTIM_PASSWORD);
     expect(unknown.status).toBe(400);
     expect(unknown.body).toMatchObject({
@@ -89,7 +89,7 @@ describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  it('il token e monouso anche con la password: due conferme concorrenti, ne riesce una sola e vince una sola password', async () => {
+  it('the token is single-use with the password too: two concurrent confirmations, only one succeeds and only one password wins', async () => {
     await register(h, VICTIM, ATTACKER_PASSWORD);
     const token = h.mail.lastToken(VICTIM, 'verification');
 
@@ -111,10 +111,10 @@ describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
     expect((await login(h, VICTIM, loser)).status).toBe(401);
   });
 
-  it('un token di verifica non cambia mai la password di un account gia verificato', async () => {
+  it('a verification token never changes the password of an already verified account', async () => {
     await register(h, VICTIM, ATTACKER_PASSWORD);
     const token = h.mail.lastToken(VICTIM, 'verification');
-    // L'account risulta verificato per altra via (es. un amministratore) ma il token e ancora in tabella.
+    // The account is verified some other way (e.g. by an administrator) but the token is still in the table.
     await h.db.query(
       `UPDATE users SET "emailVerifiedAt" = now(), password = $2 WHERE email = $1`,
       [VICTIM, await bcryptHash('Already-Verified-Passw0rd!')],
@@ -130,7 +130,7 @@ describe('A1 - password alla conferma (e2e, PostgreSQL vero)', () => {
       h,
       `SELECT count(*)::int AS n FROM auth_tokens WHERE type = 'email_verification' AND "usedAt" IS NULL`,
     );
-    expect(n).toBe(0); // il token e comunque consumato: non resta in giro
+    expect(n).toBe(0); // the token is consumed anyway: it does not stay around
   });
 });
 

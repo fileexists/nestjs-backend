@@ -3,7 +3,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import type { INestApplication } from '@nestjs/common';
 
-/** Claim restituiti dall'endpoint userinfo di Google (OpenID Connect). */
+/** Claims returned by Google's userinfo endpoint (OpenID Connect). */
 export interface GoogleUserInfo {
   sub: string;
   email?: string;
@@ -30,16 +30,16 @@ interface Oauth2Internals {
 }
 
 /**
- * Sostituisce SOLO le due chiamate di rete della strategia Passport "google"
- * (scambio del code e richiesta di userinfo). La vera strategia
- * passport-google-oauth20 resta in esecuzione, compreso il parsing del profilo
- * e il nostro `validate`. Non si chiama Google.
+ * Replaces ONLY the two network calls of the Passport "google" strategy
+ * (code exchange and userinfo request). The real passport-google-oauth20
+ * strategy keeps running, including the profile parsing
+ * and our `validate`. Google is never called.
  */
 export class FakeGoogle {
   private readonly userInfoByCode = new Map<string, GoogleUserInfo>();
   private counter = 0;
 
-  /** Installa gli stub se la strategia Passport "google" e' registrata. Ritorna false se il provider e' disattivato. */
+  /** Installs the stubs if the Passport "google" strategy is registered. Returns false if the provider is disabled. */
   installIfAvailable(): boolean {
     const strategy = (
       passport as unknown as {
@@ -57,21 +57,19 @@ export class FakeGoogle {
         _strategy(name: string): { _oauth2: Oauth2Internals } | undefined;
       }
     )._strategy('google');
-    if (!strategy)
-      throw new Error('Strategia Passport "google" non registrata');
+    if (!strategy) throw new Error('Passport "google" strategy not registered');
 
     strategy._oauth2.getOAuthAccessToken = (code, _params, cb) =>
       cb(null, `access-${code}`, undefined, {});
     strategy._oauth2.get = (_url, accessToken, cb) => {
       const info = this.userInfoByCode.get(accessToken.replace(/^access-/, ''));
-      if (!info)
-        return cb(new Error(`code Google sconosciuto: ${accessToken}`));
+      if (!info) return cb(new Error(`unknown Google code: ${accessToken}`));
       cb(null, JSON.stringify(info), {});
     };
     return this;
   }
 
-  /** Registra il profilo che Google "restituirebbe" e ritorna il `code` da presentare al callback. */
+  /** Records the profile that Google "would return" and returns the `code` to present to the callback. */
   codeFor(info: GoogleUserInfo): string {
     const code = `fake-code-${++this.counter}`;
     this.userInfoByCode.set(code, info);
@@ -80,9 +78,9 @@ export class FakeGoogle {
 }
 
 /**
- * Esegue il flusso completo come un browser: GET /api/auth/google (legge `state`
- * dal redirect), poi GET /api/auth/google/callback con code e state.
- * `agent` conserva i cookie come un browser (rispettando Path e SameSite).
+ * Runs the whole flow like a browser: GET /api/auth/google (reads `state`
+ * from the redirect), then GET /api/auth/google/callback with code and state.
+ * `agent` keeps the cookies like a browser (respecting Path and SameSite).
  */
 export async function googleLogin(
   app: INestApplication,

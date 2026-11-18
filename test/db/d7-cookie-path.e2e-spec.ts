@@ -1,5 +1,5 @@
 /**
- * D7 - Il cookie del refresh token e limitato a /api/auth (PostgreSQL vero).
+ * D7 - The refresh token cookie is limited to /api/auth (real PostgreSQL).
  */
 import { CookieAccessInfo } from 'cookiejar';
 import { createHarness, Harness } from './support/harness';
@@ -10,7 +10,7 @@ import {
   login,
 } from './support/api';
 
-describe('D7 - path del cookie di refresh (e2e, PostgreSQL vero)', () => {
+describe('D7 - refresh cookie path (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -24,7 +24,7 @@ describe('D7 - path del cookie di refresh (e2e, PostgreSQL vero)', () => {
     await createVerifiedUser(h, 'mario@example.com');
   });
 
-  it("il refresh token ha Path=/api/auth, l'access token resta su /", async () => {
+  it('the refresh token has Path=/api/auth, the access token stays on /', async () => {
     const res = await login(h, 'mario@example.com');
 
     expect(findSetCookie(res, 'refresh_token')).toMatch(
@@ -34,7 +34,7 @@ describe('D7 - path del cookie di refresh (e2e, PostgreSQL vero)', () => {
     expect(findSetCookie(res, 'refresh_token')).toMatch(/HttpOnly/i);
   });
 
-  it('un browser invia il refresh token solo alle rotte /api/auth, non al resto delle API', async () => {
+  it('a browser sends the refresh token only to the /api/auth routes, not to the rest of the APIs', async () => {
     const client = browser(h);
     await login(h, 'mario@example.com', undefined, client);
     const jar = (
@@ -54,13 +54,13 @@ describe('D7 - path del cookie di refresh (e2e, PostgreSQL vero)', () => {
     expect(names('/api/user/me')).toContain('access_token');
   });
 
-  it('il refresh continua a funzionare con il cookie del browser su /api/auth/refresh', async () => {
+  it('refresh keeps working with the browser cookie on /api/auth/refresh', async () => {
     const client = browser(h);
     await login(h, 'mario@example.com', undefined, client);
     expect((await client.post('/api/auth/refresh')).status).toBe(200);
   });
 
-  it('il logout cancella il cookie sul path nuovo E su quello vecchio "/" (cookie emessi prima della modifica)', async () => {
+  it('logout clears the cookie on the new path AND on the old "/" one (cookies issued before the change)', async () => {
     const res = await browser(h).post('/api/auth/logout');
     const cleared = (res.headers['set-cookie'] as unknown as string[]).filter(
       (c) => c.startsWith('refresh_token='),

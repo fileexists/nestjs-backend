@@ -3,7 +3,7 @@ import type { CookieOptions } from 'express';
 
 export const TRUSTED_DEVICE_COOKIE = 'trusted_device';
 export const TRUSTED_DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-/** Il cookie viaggia solo verso /api/auth (dove sta il login). */
+/** The cookie only travels to /api/auth (where the login is). */
 export const TRUSTED_DEVICE_COOKIE_PATH = '/api/auth';
 
 const sign = (secret: string, payload: string): string =>
@@ -18,12 +18,12 @@ const safeEqual = (a: string, b: string): boolean => {
 };
 
 /**
- * "Dispositivo riconosciuto": dopo un login riuscito il browser riceve un cookie
- * firmato legato a QUELL'account (e al suo tokenVersion). Serve a una sola cosa:
- * durante un blocco per tentativi falliti, il proprietario che ha gia' fatto login da
- * questo browser puo' ancora entrare (con la password giusta). Cosi' chi attacca da
- * fuori non puo' tenere fuori il proprietario all'infinito. Non salta il controllo
- * della password e non vale per altri account.
+ * "Recognized device": after a successful login the browser receives a signed cookie
+ * tied to THAT account (and to its tokenVersion). It serves a single purpose:
+ * during a lock from failed attempts, the owner who has already logged in from
+ * this browser can still get in (with the right password). So whoever attacks from
+ * outside cannot keep the owner out forever. It does not skip the password
+ * check and does not apply to other accounts.
  */
 export function createTrustedDeviceCookie(
   secret: string,

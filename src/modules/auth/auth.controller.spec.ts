@@ -4,7 +4,7 @@ import { AccountService } from './account.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 
-describe('AuthController - risposte uniformi in background (E)', () => {
+describe('AuthController - uniform background responses (E)', () => {
   const accountService = {
     queuePasswordReset: jest.fn(),
     queueResendVerification: jest.fn(),
@@ -28,7 +28,7 @@ describe('AuthController - risposte uniformi in background (E)', () => {
     controller = module.get(AuthController);
   });
 
-  it('forgot-password: accoda il lavoro e risponde subito con un messaggio fisso (sincrono, non attende nulla)', () => {
+  it('forgot-password: queues the work and answers immediately with a fixed message (synchronous, waits for nothing)', () => {
     const result = controller.forgotPassword({ email: 'a@example.com' });
 
     expect(accountService.queuePasswordReset).toHaveBeenCalledWith(
@@ -42,13 +42,13 @@ describe('AuthController - risposte uniformi in background (E)', () => {
     expect(result).not.toBeInstanceOf(Promise);
   });
 
-  it('forgot-password: stesso corpo per qualsiasi indirizzo', () => {
+  it('forgot-password: same body for any address', () => {
     expect(controller.forgotPassword({ email: 'a@example.com' })).toEqual(
       controller.forgotPassword({ email: 'ghost@example.com' }),
     );
   });
 
-  it('resend-verification: accoda il lavoro e risponde subito con un messaggio fisso', () => {
+  it('resend-verification: queues the work and answers immediately with a fixed message', () => {
     const result = controller.resendVerification({ email: 'a@example.com' });
 
     expect(accountService.queueResendVerification).toHaveBeenCalledWith(
@@ -60,7 +60,7 @@ describe('AuthController - risposte uniformi in background (E)', () => {
     );
   });
 
-  it('reset-password: delega al servizio con token e nuova password', async () => {
+  it('reset-password: delegates to the service with the token and the new password', async () => {
     authService.resetPassword.mockResolvedValue(undefined);
 
     const result = await controller.resetPassword({

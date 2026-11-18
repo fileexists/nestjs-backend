@@ -34,7 +34,7 @@ export class UserController {
     if (!user) {
       throw new UnauthorizedException('User is not authenticated.');
     }
-    // Whitelist esplicita: nessun campo interno dell'entita' (tokenVersion, password, googleId...) esce.
+    // Explicit whitelist: no internal entity field (tokenVersion, password, googleId...) comes out.
     return plainToInstance(UserResponseDto, user, {
       excludeExtraneousValues: true,
     });

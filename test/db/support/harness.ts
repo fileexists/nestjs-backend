@@ -11,27 +11,27 @@ import { MailOutbox } from './mail-outbox';
 
 export interface Harness {
   app: NestExpressApplication;
-  /** Connessione diretta al database di test, per preparare/ispezionare i dati. */
+  /** Direct connection to the test database, to prepare/inspect the data. */
   db: DataSource;
-  /** Email "inviate" (MailService sostituito da un outbox in memoria). */
+  /** "Sent" emails (MailService replaced by an in-memory outbox). */
   mail: MailOutbox;
-  /** Strategia Google con la rete stubbata. */
+  /** Google strategy with the network stubbed. */
   google: FakeGoogle;
-  /** Svuota i dati tra un test e l'altro. */
+  /** Empties the data between one test and the next. */
   reset(): Promise<void>;
   close(): Promise<void>;
 }
 
 export interface HarnessOptions {
-  /** Lascia attivo il ThrottlerGuard (default: disattivato, tutte le richieste arrivano dallo stesso IP). */
+  /** Keeps the ThrottlerGuard active (default: disabled, all requests come from the same IP). */
   throttle?: boolean;
-  /** Usa il MailService vero (SMTP): solo per i test di integrazione con Mailpit. */
+  /** Uses the real MailService (SMTP): only for the integration tests with Mailpit. */
   realMail?: boolean;
 }
 
 /**
- * Avvia l'intera applicazione NestJS contro un PostgreSQL vero:
- * schema ricreato dalle migrazioni, guard/pipe/filtri identici a produzione.
+ * Starts the whole NestJS application against a real PostgreSQL:
+ * schema recreated from the migrations, guards/pipes/filters identical to production.
  */
 export async function createHarness(
   options: HarnessOptions = {},

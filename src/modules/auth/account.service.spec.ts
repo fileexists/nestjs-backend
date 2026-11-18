@@ -1,17 +1,18 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import {
   AccountService,
   NOTICE_COOLDOWN_MS,
   RESEND_COOLDOWN_MS,
+  SHUTDOWN_DRAIN_TIMEOUT_MS,
 } from './account.service';
 import { AuthTokenService } from './auth-token.service';
 import { AuthTokenType } from '../../common/entities/auth-token.entity';
 import { UserService } from '../user/user.service';
 import { MailService } from '../mail/mail.service';
 
-describe('AccountService (verifica email)', () => {
+describe('AccountService (email verification)', () => {
   const userService = {
     getUserByEmail: jest.fn(),
     activateWithPassword: jest.fn(),
@@ -55,7 +56,7 @@ describe('AccountService (verifica email)', () => {
   });
 
   describe('sendVerification', () => {
-    it('emette un token di verifica col TTL configurato e lo invia per email', async () => {
+    it('issues a verification token with the configured TTL and sends it by email', async () => {
       await service.sendVerification({ id: 'u1', email: 'a@example.com' });
 
       expect(authTokens.issue).toHaveBeenCalledWith(
@@ -69,14 +70,14 @@ describe('AccountService (verifica email)', () => {
       );
     });
 
-    it("non fallisce se l'SMTP e' giu: l'errore viene solo loggato", async () => {
+    it('does not fail if SMTP is down: the error is only logged', async () => {
       mail.sendVerificationEmail.mockRejectedValue(new Error('smtp down'));
       await expect(
         service.sendVerification({ id: 'u1', email: 'a@example.com' }),
       ).resolves.toBeUndefined();
     });
 
-    it("non attende l'invio (la risposta HTTP non deve dipendere dall'SMTP)", async () => {
+    it('does not wait for the send (the HTTP response must not depend on SMTP)', async () => {
       mail.sendVerificationEmail.mockReturnValue(new Promise(() => undefined));
       await expect(
         service.sendVerification({ id: 'u1', email: 'a@example.com' }),
@@ -85,7 +86,7 @@ describe('AccountService (verifica email)', () => {
   });
 
   describe('verifyEmail', () => {
-    it("attiva l'utente del token consumato con la password scelta (gia hashata)", async () => {
+    it('activates the user of the consumed token with the chosen password (already hashed)', async () => {
       authTokens.consume.mockResolvedValue('u1');
       userService.activateWithPassword.mockResolvedValue(true);
 
@@ -101,7 +102,7 @@ describe('AccountService (verifica email)', () => {
       );
     });
 
-    it('rifiuta token non valido, scaduto o gia usato con 400', async () => {
+    it('rejects an invalid, expired or already used token with 400', async () => {
       authTokens.consume.mockResolvedValue(null);
       await expect(service.verifyEmail('bad', 'h')).rejects.toBeInstanceOf(
         BadRequestException,
@@ -109,7 +110,7 @@ describe('AccountService (verifica email)', () => {
       expect(userService.activateWithPassword).not.toHaveBeenCalled();
     });
 
-    it("account gia verificato (o sparito): 400, la password non cambia e l'errore e quello del token non valido", async () => {
+    it('account already verified (or gone): 400, the password does not change and the error is the invalid-token one', async () => {
       authTokens.consume.mockResolvedValue('u1');
       userService.activateWithPassword.mockResolvedValue(false);
 
@@ -127,7 +128,7 @@ describe('AccountService (verifica email)', () => {
       emailVerifiedAt: undefined,
     };
 
-    it('reinvia a un account non verificato', async () => {
+    it('resends to an unverified account', async () => {
       userService.getUserByEmail.mockResolvedValue(unverified);
       authTokens.findLatestActive.mockResolvedValue(null);
       await service.resendVerification('a@example.com');
@@ -138,16 +139,16 @@ describe('AccountService (verifica email)', () => {
     });
 
     it.each([
-      ['utente inesistente', null],
+      ['nonexistent user', null],
       [
-        'account gia verificato',
+        'account already verified',
         { ...unverified, emailVerifiedAt: new Date() },
       ],
       [
-        'account senza password (Google)',
+        'account without a password (Google)',
         { ...unverified, password: undefined },
       ],
-    ])('non invia nulla e non lancia per: %s', async (_label, user) => {
+    ])('sends nothing and does not throw for: %s', async (_label, user) => {
       userService.getUserByEmail.mockResolvedValue(user);
       await expect(
         service.resendVerification('a@example.com'),
@@ -155,7 +156,7 @@ describe('AccountService (verifica email)', () => {
       expect(mail.sendVerificationEmail).not.toHaveBeenCalled();
     });
 
-    it('rispetta il periodo di attesa tra due invii', async () => {
+    it('respects the wait period between two sends', async () => {
       userService.getUserByEmail.mockResolvedValue(unverified);
       authTokens.findLatestActive.mockResolvedValue({
         createdAt: new Date(Date.now() - RESEND_COOLDOWN_MS / 2),
@@ -164,7 +165,7 @@ describe('AccountService (verifica email)', () => {
       expect(mail.sendVerificationEmail).not.toHaveBeenCalled();
     });
 
-    it('reinvia dopo il periodo di attesa', async () => {
+    it('resends after the wait period', async () => {
       userService.getUserByEmail.mockResolvedValue(unverified);
       authTokens.findLatestActive.mockResolvedValue({
         createdAt: new Date(Date.now() - RESEND_COOLDOWN_MS - 1000),
@@ -177,7 +178,7 @@ describe('AccountService (verifica email)', () => {
   describe('sendRegistrationNotice (D1)', () => {
     const user = { id: 'u1', email: 'a@example.com' };
 
-    it("avvisa il proprietario e registra l'invio (per limitarne la frequenza)", async () => {
+    it('notifies the owner and records the send (to limit its frequency)', async () => {
       authTokens.findLatestActive.mockResolvedValue(null);
 
       await service.sendRegistrationNotice(user);
@@ -191,7 +192,7 @@ describe('AccountService (verifica email)', () => {
       expect(mail.sendVerificationEmail).not.toHaveBeenCalled();
     });
 
-    it('non invia un secondo avviso entro il periodo di attesa (niente inondazione della casella)', async () => {
+    it('does not send a second notice within the wait period (no flooding of the mailbox)', async () => {
       authTokens.findLatestActive.mockResolvedValue({
         createdAt: new Date(Date.now() - NOTICE_COOLDOWN_MS / 2),
       });
@@ -202,7 +203,7 @@ describe('AccountService (verifica email)', () => {
       expect(authTokens.issue).not.toHaveBeenCalled();
     });
 
-    it('dopo il periodo di attesa avvisa di nuovo', async () => {
+    it('after the wait period notifies again', async () => {
       authTokens.findLatestActive.mockResolvedValue({
         createdAt: new Date(Date.now() - NOTICE_COOLDOWN_MS - 1000),
       });
@@ -212,7 +213,7 @@ describe('AccountService (verifica email)', () => {
       expect(mail.sendRegistrationNotice).toHaveBeenCalled();
     });
 
-    it('un errore SMTP non fa fallire la registrazione', async () => {
+    it('an SMTP error does not make the registration fail', async () => {
       authTokens.findLatestActive.mockResolvedValue(null);
       mail.sendRegistrationNotice.mockRejectedValue(new Error('smtp down'));
 
@@ -225,7 +226,7 @@ describe('AccountService (verifica email)', () => {
   describe('requestPasswordReset (E)', () => {
     const user = { id: 'u1', email: 'a@example.com' };
 
-    it('per un account esistente emette un token di reset col TTL configurato e lo invia', async () => {
+    it('for an existing account issues a reset token with the configured TTL and sends it', async () => {
       userService.getUserByEmail.mockResolvedValue(user);
       authTokens.findLatestActive.mockResolvedValue(null);
 
@@ -243,7 +244,7 @@ describe('AccountService (verifica email)', () => {
       );
     });
 
-    it('per un indirizzo inesistente non fa nulla e non lancia (nessun indizio)', async () => {
+    it('for a nonexistent address does nothing and does not throw (no clue given away)', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
 
       await expect(
@@ -253,7 +254,7 @@ describe('AccountService (verifica email)', () => {
       expect(mail.sendPasswordResetEmail).not.toHaveBeenCalled();
     });
 
-    it('vale anche per account non verificati o solo-Google', async () => {
+    it('also applies to unverified or Google-only accounts', async () => {
       for (const account of [
         { ...user, emailVerifiedAt: undefined, password: 'hash' },
         { ...user, emailVerifiedAt: new Date(), password: undefined },
@@ -269,7 +270,7 @@ describe('AccountService (verifica email)', () => {
       }
     });
 
-    it('rispetta il periodo di attesa tra due richieste', async () => {
+    it('respects the wait period between two requests', async () => {
       userService.getUserByEmail.mockResolvedValue(user);
       authTokens.findLatestActive.mockResolvedValue({
         createdAt: new Date(Date.now() - RESEND_COOLDOWN_MS / 2),
@@ -281,8 +282,8 @@ describe('AccountService (verifica email)', () => {
     });
   });
 
-  describe('lavori in background (risposte uniformi)', () => {
-    it('runInBackground non aspetta il lavoro, non propaga gli errori e drain li attende', async () => {
+  describe('background jobs (uniform responses)', () => {
+    it('runInBackground does not wait for the job, does not propagate errors, and drain waits for them', async () => {
       let finished = false;
       service.runInBackground(async () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
@@ -295,7 +296,7 @@ describe('AccountService (verifica email)', () => {
       expect(finished).toBe(true);
     });
 
-    it('drain attende anche i lavori accodati da altri lavori (es. invio email dentro la richiesta)', async () => {
+    it('drain also waits for jobs queued by other jobs (e.g. sending an email inside the request)', async () => {
       const order: string[] = [];
       service.runInBackground(async () => {
         await Promise.resolve();
@@ -311,7 +312,7 @@ describe('AccountService (verifica email)', () => {
       expect(order).toEqual(['outer', 'inner']);
     });
 
-    it('queuePasswordReset e queueResendVerification ritornano subito e fanno il lavoro dopo', async () => {
+    it('queuePasswordReset and queueResendVerification return immediately and do the work afterwards', async () => {
       userService.getUserByEmail.mockResolvedValue({
         id: 'u1',
         email: 'a@example.com',
@@ -331,10 +332,90 @@ describe('AccountService (verifica email)', () => {
       expect(mail.sendVerificationEmail).toHaveBeenCalledTimes(1);
     });
 
-    it('un errore nel lavoro in background non fa mai fallire la richiesta', async () => {
+    it('an error in the background job never fails the request', async () => {
       userService.getUserByEmail.mockRejectedValue(new Error('db down'));
       expect(() => service.queuePasswordReset('a@example.com')).not.toThrow();
       await expect(service.drain()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('shutdown', () => {
+    const queueSlowJob = () => {
+      let finish!: () => void;
+      userService.getUserByEmail.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(null);
+          }),
+      );
+      service.queuePasswordReset('a@example.com');
+      return () => finish();
+    };
+
+    it('is a Nest shutdown hook', () => {
+      expect(typeof service.onApplicationShutdown).toBe('function');
+    });
+
+    it('waits for the emails already queued before the process exits', async () => {
+      const release = queueSlowJob();
+      let done = false;
+      const shutdown = service.onApplicationShutdown().then(() => {
+        done = true;
+      });
+
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(done).toBe(false);
+
+      release();
+      await shutdown;
+      expect(done).toBe(true);
+    });
+
+    it('hands the wait to drain() with a time limit', async () => {
+      const drain = jest.spyOn(service, 'drain').mockResolvedValue();
+
+      await service.onApplicationShutdown();
+
+      expect(drain).toHaveBeenCalledWith(SHUTDOWN_DRAIN_TIMEOUT_MS);
+      expect(SHUTDOWN_DRAIN_TIMEOUT_MS).toBeGreaterThan(0);
+    });
+
+    it('drain(timeout) gives up on a job that never ends and says how many were left', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      queueSlowJob();
+
+      await expect(service.drain(30)).resolves.toBeUndefined();
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(/1 background operations/);
+      warn.mockRestore();
+    });
+
+    it('drain(timeout) is quiet when everything finishes in time', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      userService.getUserByEmail.mockResolvedValue(null);
+      service.queuePasswordReset('a@example.com');
+
+      await service.drain(1000);
+
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it('without a timeout drain keeps waiting as before', async () => {
+      const release = queueSlowJob();
+      let done = false;
+      const waiting = service.drain().then(() => {
+        done = true;
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(done).toBe(false);
+
+      release();
+      await waiting;
+      expect(done).toBe(true);
     });
   });
 });

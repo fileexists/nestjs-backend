@@ -41,7 +41,7 @@ describe('LoginAttemptService (D2)', () => {
     service = await build();
   });
 
-  it("identifierFor: hash dell'email NORMALIZZATA (maiuscole e spazi non cambiano la chiave)", () => {
+  it('identifierFor: hash of the NORMALIZED email (case and spaces do not change the key)', () => {
     expect(LoginAttemptService.identifierFor('  Mario@Example.COM ')).toBe(
       sha('mario@example.com'),
     );
@@ -61,7 +61,7 @@ describe('LoginAttemptService (D2)', () => {
     const update = (call: number) =>
       tx.query.mock.calls[call] as [string, unknown[]];
 
-    it('prima blocca la riga (upsert fittizio) in una transazione, poi aggiorna', async () => {
+    it('first locks the row (dummy upsert) in a transaction, then updates', async () => {
       tx.query.mockResolvedValueOnce([row()]).mockResolvedValueOnce([]);
 
       await expect(service.registerAttempt('a@example.com')).resolves.toEqual({
@@ -75,7 +75,7 @@ describe('LoginAttemptService (D2)', () => {
       expect(params).toEqual([sha('a@example.com'), 1800]);
     });
 
-    it('sotto soglia: conta il tentativo e non blocca', async () => {
+    it('below the threshold: counts the attempt and does not lock', async () => {
       tx.query
         .mockResolvedValueOnce([row({ failedCount: 2, lockLevel: 1 })])
         .mockResolvedValueOnce([]);
@@ -89,7 +89,7 @@ describe('LoginAttemptService (D2)', () => {
       expect(params).toEqual([sha('a@example.com'), 3, 1]);
     });
 
-    it('il tentativo che raggiunge la soglia fa scattare il blocco, ma passa (la password si verifica)', async () => {
+    it('the attempt that reaches the threshold triggers the lock, but goes through (the password is verified)', async () => {
       tx.query
         .mockResolvedValueOnce([row({ failedCount: 4, lockLevel: 2 })])
         .mockResolvedValueOnce([]);
@@ -101,11 +101,11 @@ describe('LoginAttemptService (D2)', () => {
       expect(sql).toContain('power(2, $4::int)');
       expect(sql).toContain('LEAST(');
       expect(sql).toContain('"failedCount" = 0');
-      // durata = min(tetto, base * 2^livello); il livello cresce di uno
+      // duration = min(cap, base * 2^level); the level grows by one
       expect(params).toEqual([sha('a@example.com'), 900, 60, 2]);
     });
 
-    it('account gia bloccato: lo dice senza contare nulla (non prolunga il blocco)', async () => {
+    it('account already locked: says so without counting anything (does not extend the lock)', async () => {
       tx.query.mockResolvedValueOnce([row({ failedCount: 0, locked: true })]);
 
       await expect(service.registerAttempt('a@example.com')).resolves.toEqual({
@@ -115,7 +115,7 @@ describe('LoginAttemptService (D2)', () => {
       expect(tx.query).toHaveBeenCalledTimes(1);
     });
 
-    it('fuori finestra riparte da zero: contatore e livello azzerati', async () => {
+    it('outside the window it starts again from zero: counter and level reset', async () => {
       tx.query
         .mockResolvedValueOnce([
           row({ failedCount: 4, lockLevel: 3, stale: true }),
@@ -128,7 +128,7 @@ describe('LoginAttemptService (D2)', () => {
       expect(params).toEqual([sha('a@example.com'), 1, 0]);
     });
 
-    it('i parametri sono configurabili', async () => {
+    it('the parameters are configurable', async () => {
       const custom = await build({
         LOGIN_MAX_FAILED_ATTEMPTS: 3,
         LOGIN_LOCK_BASE_SECONDS: 10,
@@ -145,7 +145,7 @@ describe('LoginAttemptService (D2)', () => {
       expect(update(1)[1]).toEqual([sha('a@example.com'), 100, 10, 0]);
     });
 
-    it('un errore del database si propaga (nessun tentativo passa in silenzio)', async () => {
+    it('a database error is propagated (no attempt goes through silently)', async () => {
       tx.query.mockRejectedValueOnce(new Error('db down'));
 
       await expect(service.registerAttempt('a@example.com')).rejects.toThrow(
@@ -154,14 +154,14 @@ describe('LoginAttemptService (D2)', () => {
     });
   });
 
-  it("reset cancella il record dell'account", async () => {
+  it('reset deletes the account record', async () => {
     await service.reset('A@Example.com');
     expect(repository.delete).toHaveBeenCalledWith({
       identifier: sha('a@example.com'),
     });
   });
 
-  it('deleteStale elimina i record non bloccati e fuori finestra e ritorna il conteggio', async () => {
+  it('deleteStale removes the records that are not locked and outside the window and returns the count', async () => {
     queryBuilder.execute.mockResolvedValue({ affected: 7 });
     await expect(service.deleteStale()).resolves.toBe(7);
     const [condition] = queryBuilder.where.mock.calls[0] as [string];

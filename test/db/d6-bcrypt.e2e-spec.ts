@@ -1,5 +1,5 @@
 /**
- * D6 - Costo bcrypt configurabile (BCRYPT_ROUNDS) e re-hash trasparente al login. (PostgreSQL vero)
+ * D6 - Configurable bcrypt cost (BCRYPT_ROUNDS) and transparent re-hash at login. (real PostgreSQL)
  */
 process.env.BCRYPT_ROUNDS = '6';
 
@@ -13,7 +13,7 @@ import {
   userRow,
 } from './support/api';
 
-describe('D6 - bcrypt (e2e, PostgreSQL vero)', () => {
+describe('D6 - bcrypt (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -29,12 +29,12 @@ describe('D6 - bcrypt (e2e, PostgreSQL vero)', () => {
   const storedHash = async (email: string) =>
     (await userRow(h, email))!.password!;
 
-  it('le nuove password sono hashate con BCRYPT_ROUNDS', async () => {
+  it('new passwords are hashed with BCRYPT_ROUNDS', async () => {
     await createVerifiedUser(h, 'new@example.com');
     expect(bcrypt.getRounds(await storedHash('new@example.com'))).toBe(6);
   });
 
-  it('al login con un hash vecchio (costo inferiore) lo rigenera con il costo attuale, senza invalidare le sessioni', async () => {
+  it('at login with an old hash (lower cost) it regenerates it with the current cost, without invalidating sessions', async () => {
     await createVerifiedUser(h, 'old@example.com');
     const legacy = await bcrypt.hash(PASSWORD, 4);
     await h.db.query(
@@ -51,10 +51,10 @@ describe('D6 - bcrypt (e2e, PostgreSQL vero)', () => {
     expect(after!.password).not.toBe(legacy);
     expect(after!.tokenVersion).toBe(before!.tokenVersion);
     expect(await bcrypt.compare(PASSWORD, after!.password!)).toBe(true);
-    expect((await login(h, 'old@example.com')).status).toBe(200); // la nuova password funziona
+    expect((await login(h, 'old@example.com')).status).toBe(200); // the new password works
   });
 
-  it('un hash gia al costo attuale non viene riscritto', async () => {
+  it('a hash already at the current cost is not rewritten', async () => {
     await createVerifiedUser(h, 'same@example.com');
     const before = await storedHash('same@example.com');
 
@@ -63,7 +63,7 @@ describe('D6 - bcrypt (e2e, PostgreSQL vero)', () => {
     expect(await storedHash('same@example.com')).toBe(before);
   });
 
-  it('un hash con costo piu alto non viene mai abbassato', async () => {
+  it('a hash with a higher cost is never lowered', async () => {
     await createVerifiedUser(h, 'strong@example.com');
     const strong = await bcrypt.hash(PASSWORD, 8);
     await h.db.query(
@@ -76,7 +76,7 @@ describe('D6 - bcrypt (e2e, PostgreSQL vero)', () => {
     expect(await storedHash('strong@example.com')).toBe(strong);
   });
 
-  it('con password sbagliata non si rigenera nulla', async () => {
+  it('with a wrong password nothing is regenerated', async () => {
     await createVerifiedUser(h, 'old@example.com');
     const legacy = await bcrypt.hash(PASSWORD, 4);
     await h.db.query(
@@ -89,7 +89,7 @@ describe('D6 - bcrypt (e2e, PostgreSQL vero)', () => {
     expect(await storedHash('old@example.com')).toBe(legacy);
   });
 
-  it('(nessun duplicato) la tabella ha ancora un solo utente', async () => {
+  it('(no duplicate) the table still has a single user', async () => {
     await createVerifiedUser(h, 'one@example.com');
     expect(
       (await sql<{ n: number }>(h, 'SELECT count(*)::int AS n FROM users'))[0]

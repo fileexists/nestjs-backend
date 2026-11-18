@@ -10,9 +10,9 @@ import {
 import { User } from './user.entity';
 
 /**
- * Un refresh token emesso (uno per ogni rotazione). Tutti i token di una stessa
- * sessione condividono `familyId`: se ne viene ripresentato uno gia' usato
- * (furto) si revoca l'intera famiglia. Nel database c'e' solo lo SHA-256 del jti.
+ * An issued refresh token (one per rotation). All the tokens of the same
+ * session share `familyId`: if an already used one is presented again
+ * (theft) the whole family is revoked. Only the SHA-256 of the jti is stored in the database.
  */
 @Entity('refresh_tokens')
 @Index('IDX_refresh_tokens_family', ['familyId'])
@@ -35,11 +35,11 @@ export class RefreshToken {
   @Column({ type: 'uuid' })
   familyId: string;
 
-  /** Impostato alla rotazione: un token usato non puo' essere usato di nuovo. */
+  /** Set on rotation: a used token cannot be used again. */
   @Column({ type: 'timestamptz', nullable: true })
   usedAt: Date | null;
 
-  /** Impostato alla revoca (logout, reuse detection, logout-all). */
+  /** Set on revocation (logout, reuse detection, logout-all). */
   @Column({ type: 'timestamptz', nullable: true })
   revokedAt: Date | null;
 

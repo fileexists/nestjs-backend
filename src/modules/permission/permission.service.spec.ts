@@ -47,7 +47,7 @@ describe('PermissionService', () => {
   });
 
   describe('findPermission', () => {
-    it('cerca per filtro senza caricare gli utenti collegati', async () => {
+    it('looks up by filter without loading the linked users', async () => {
       const permission = buildPermission();
       mockPermissionRepository.findOne.mockResolvedValue(permission);
 
@@ -59,7 +59,7 @@ describe('PermissionService', () => {
       expect(result).toEqual(permission);
     });
 
-    it('ritorna null se nessun permesso corrisponde', async () => {
+    it('returns null if no permission matches', async () => {
       mockPermissionRepository.findOne.mockResolvedValue(null);
 
       await expect(
@@ -200,7 +200,7 @@ describe('PermissionService', () => {
     });
   });
 
-  describe('permessi indispensabili (D5)', () => {
+  describe('essential permissions (D5)', () => {
     beforeEach(() => {
       mockPermissionRepository.create.mockImplementation((d: object) => d);
       mockPermissionRepository.save.mockImplementation((d: object) =>
@@ -209,7 +209,7 @@ describe('PermissionService', () => {
     });
 
     describe('ensureDefaults / onApplicationBootstrap', () => {
-      it('crea il permesso USER se manca', async () => {
+      it('creates the USER permission if it is missing', async () => {
         mockPermissionRepository.findOne.mockResolvedValue(null);
 
         await service.ensureDefaults();
@@ -220,7 +220,7 @@ describe('PermissionService', () => {
         });
       });
 
-      it('e idempotente: se esiste non scrive nulla (descrizione modificata inclusa)', async () => {
+      it('is idempotent: if it exists it writes nothing (even if the description was changed)', async () => {
         mockPermissionRepository.findOne.mockResolvedValue(buildPermission());
 
         await service.ensureDefaults();
@@ -229,14 +229,14 @@ describe('PermissionService', () => {
         expect(mockPermissionRepository.save).not.toHaveBeenCalled();
       });
 
-      it("con piu istanze in avvio: l'unicita violata da chi arriva secondo viene ignorata", async () => {
+      it('with several instances starting up: the uniqueness violation hit by whoever arrives second is ignored', async () => {
         mockPermissionRepository.findOne.mockResolvedValue(null);
         mockPermissionRepository.save.mockRejectedValue({ code: '23505' });
 
         await expect(service.ensureDefaults()).resolves.toBeUndefined();
       });
 
-      it("un errore diverso (database giu) fa fallire l'avvio invece di essere nascosto", async () => {
+      it('a different error (database down) makes the startup fail instead of being hidden', async () => {
         mockPermissionRepository.findOne.mockResolvedValue(null);
         mockPermissionRepository.save.mockRejectedValue(
           new Error('connection refused'),
@@ -247,7 +247,7 @@ describe('PermissionService', () => {
         );
       });
 
-      it("viene eseguito all'avvio dell'applicazione", async () => {
+      it('runs when the application starts', async () => {
         mockPermissionRepository.findOne.mockResolvedValue(null);
 
         await service.onApplicationBootstrap();
@@ -257,7 +257,7 @@ describe('PermissionService', () => {
     });
 
     describe('getRequired', () => {
-      it('ritorna il permesso senza caricare la relazione users (non scansiona tutti gli utenti)', async () => {
+      it('returns the permission without loading the users relation (it does not scan all the users)', async () => {
         const permission = buildPermission();
         mockPermissionRepository.findOne.mockResolvedValue(permission);
 
@@ -268,7 +268,7 @@ describe('PermissionService', () => {
         });
       });
 
-      it('se manca risponde 503: mai un utente senza permessi in silenzio', async () => {
+      it('if it is missing answers 503: never a user without permissions, silently', async () => {
         mockPermissionRepository.findOne.mockResolvedValue(null);
 
         await expect(service.getRequired('USER')).rejects.toBeInstanceOf(

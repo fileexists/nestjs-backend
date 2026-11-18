@@ -8,12 +8,12 @@ describe('parseDurationMs', () => {
     ['24h', 86_400_000],
     ['7d', 604_800_000],
     ['2w', 1_209_600_000],
-  ])('converte %s in %i ms', (input, expected) => {
+  ])('converts %s to %i ms', (input, expected) => {
     expect(parseDurationMs(input)).toBe(expected);
   });
 
   it.each(['', 'abc', '15', 'm15', '1.5h', '-5m', '10 m'])(
-    'ritorna 0 per il formato non valido "%s"',
+    'returns 0 for the invalid format "%s"',
     (input) => {
       expect(parseDurationMs(input)).toBe(0);
     },

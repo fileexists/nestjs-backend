@@ -46,8 +46,8 @@ function contextWith(request: Record<string, unknown>) {
 
 describe('GoogleCallbackGuard (B3)', () => {
   const guard = new GoogleCallbackGuard(config);
-  // La parte Passport (classe padre, memoizzata e condivisa dai due guard) e' sostituita:
-  // qui si testa solo la verifica dello state.
+  // The Passport part (parent class, memoized and shared by the two guards) is replaced:
+  // here only the state check is tested.
   let passport: jest.SpyInstance;
   beforeAll(() => {
     passport = jest
@@ -57,7 +57,7 @@ describe('GoogleCallbackGuard (B3)', () => {
   beforeEach(() => passport.mockClear());
   afterAll(() => passport.mockRestore());
 
-  it('con state e cookie coerenti prosegue verso Passport e ricorda l indice di redirect', async () => {
+  it('with a consistent state and cookie it proceeds to Passport and remembers the redirect index', async () => {
     const { state, cookie } = createOAuthState(SECRET, 1);
     const request: Record<string, unknown> = {
       cookies: { [OAUTH_STATE_COOKIE]: cookie },
@@ -76,11 +76,11 @@ describe('GoogleCallbackGuard (B3)', () => {
   });
 
   it.each([
-    ['senza cookie', { cookies: {}, query: { state: 'x'.repeat(43) } }],
-    ['senza cookie jar', { query: { state: 'x'.repeat(43) } }],
-    ['senza state', { cookies: { [OAUTH_STATE_COOKIE]: 'a.0.b' }, query: {} }],
+    ['no cookie', { cookies: {}, query: { state: 'x'.repeat(43) } }],
+    ['no cookie jar', { query: { state: 'x'.repeat(43) } }],
+    ['no state', { cookies: { [OAUTH_STATE_COOKIE]: 'a.0.b' }, query: {} }],
     [
-      'con cookie forgiato',
+      'with a forged cookie',
       {
         cookies: {
           [OAUTH_STATE_COOKIE]: `${'n'.repeat(43)}.0.${'s'.repeat(43)}`,
@@ -89,7 +89,7 @@ describe('GoogleCallbackGuard (B3)', () => {
       },
     ],
   ])(
-    '%s: 401 state_invalid, Passport NON viene chiamato e il cookie viene comunque cancellato',
+    '%s: 401 state_invalid, Passport is NOT called and the cookie is cleared anyway',
     async (_label, request) => {
       const { context, response } = contextWith(request);
 
@@ -103,7 +103,7 @@ describe('GoogleCallbackGuard (B3)', () => {
     },
   );
 
-  it('un cookie gia usato (cancellato) non vale per un secondo callback', async () => {
+  it('an already used (cleared) cookie is not valid for a second callback', async () => {
     const { state, cookie } = createOAuthState(SECRET);
     const first = contextWith({
       cookies: { [OAUTH_STATE_COOKIE]: cookie },
@@ -111,7 +111,7 @@ describe('GoogleCallbackGuard (B3)', () => {
     });
     await guard.canActivate(first.context);
 
-    // il browser ha ricevuto la cancellazione: il secondo callback arriva senza cookie
+    // the browser received the deletion: the second callback arrives without a cookie
     const second = contextWith({ cookies: {}, query: { state } });
     await expect(guard.canActivate(second.context)).rejects.toBeInstanceOf(
       GoogleAuthException,
@@ -119,7 +119,7 @@ describe('GoogleCallbackGuard (B3)', () => {
   });
 });
 
-describe('GoogleOAuthGuard (avvio flusso, B3/C2)', () => {
+describe('GoogleOAuthGuard (flow start, B3/C2)', () => {
   const guard = new GoogleOAuthGuard(config);
   let passport: jest.SpyInstance;
   beforeAll(() => {
@@ -129,7 +129,7 @@ describe('GoogleOAuthGuard (avvio flusso, B3/C2)', () => {
   });
   afterAll(() => passport.mockRestore());
 
-  it('genera lo state, imposta il cookie firmato e lo passa a Passport', async () => {
+  it('generates the state, sets the signed cookie and passes it to Passport', async () => {
     const request: Record<string, unknown> = { query: {} };
     const { context, response } = contextWith(request);
 
@@ -152,7 +152,7 @@ describe('GoogleOAuthGuard (avvio flusso, B3/C2)', () => {
     });
   });
 
-  it('non chiede accesso offline ne consenso forzato (i token Google non si usano)', () => {
+  it('asks for neither offline access nor forced consent (Google tokens are not used)', () => {
     const { context } = contextWith({ oauthState: 's' });
     const options = guard.getAuthenticateOptions(context) as Record<
       string,
@@ -163,14 +163,14 @@ describe('GoogleOAuthGuard (avvio flusso, B3/C2)', () => {
   });
 });
 
-describe('guard Google con provider non configurato (C2)', () => {
+describe('Google guard with the provider not configured (C2)', () => {
   const unconfigured = configWith({ GOOGLE_CLIENT_SECRET: '' });
 
   it.each([
-    ['avvio', () => new GoogleOAuthGuard(unconfigured)],
+    ['flow start', () => new GoogleOAuthGuard(unconfigured)],
     ['callback', () => new GoogleCallbackGuard(unconfigured)],
   ])(
-    '%s: 501 e nessun cookie, senza chiamare Passport',
+    '%s: 501 and no cookie, without calling Passport',
     async (_name, build) => {
       const guard = build();
       const { context, response } = contextWith({ cookies: {}, query: {} });
@@ -194,7 +194,7 @@ describe('GoogleOAuthGuard - redirect_to (C1)', () => {
   });
   afterAll(() => jest.restoreAllMocks());
 
-  it('firma nel cookie l indice dell origine scelta (non l URL)', async () => {
+  it('signs the index of the chosen origin into the cookie (not the URL)', async () => {
     const request = { query: { redirect_to: 'https://admin.example.com' } };
     const { context, response } = contextWith(request);
 
@@ -212,7 +212,7 @@ describe('GoogleOAuthGuard - redirect_to (C1)', () => {
     '//evil.com',
     'javascript:alert(1)',
     '',
-  ])('rifiuta redirect_to=%j con 400 e non imposta cookie', async (evil) => {
+  ])('rejects redirect_to=%j with 400 and sets no cookie', async (evil) => {
     const { context, response } = contextWith({ query: { redirect_to: evil } });
 
     const error = await Promise.resolve()
@@ -223,7 +223,7 @@ describe('GoogleOAuthGuard - redirect_to (C1)', () => {
     expect(response.cookie).not.toHaveBeenCalled();
   });
 
-  it('rifiuta un redirect_to non stringa (es. array)', async () => {
+  it('rejects a non-string redirect_to (e.g. an array)', async () => {
     const { context } = contextWith({ query: { redirect_to: ['a', 'b'] } });
     await expect(
       Promise.resolve().then(() => guard.canActivate(context)),

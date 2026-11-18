@@ -1,6 +1,6 @@
 /**
- * E - Reset della password (PostgreSQL vero): richiesta via email, token monouso con
- * scadenza, invalidazione di tutte le sessioni dopo il reset.
+ * E - Password reset (real PostgreSQL): request via email, single-use token with
+ * an expiry, invalidation of all the sessions after the reset.
  */
 import { createHash } from 'crypto';
 import { createHarness, Harness } from './support/harness';
@@ -26,7 +26,7 @@ import { googleLogin } from './support/google';
 const EMAIL = 'mario@example.com';
 const NEW_PASSWORD = 'Brand-New-Passw0rd!';
 
-describe('E - reset password (e2e, PostgreSQL vero)', () => {
+describe('E - password reset (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -42,24 +42,24 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
     h.mail.delayMs = 0;
   });
 
-  /** Richiede il reset e ritorna il token "ricevuto" via email. */
+  /** Requests the reset and returns the token "received" by email. */
   async function requestReset(email = EMAIL): Promise<string> {
     expect((await forgotPassword(h, email)).status).toBe(202);
     await settle(h);
     return h.mail.lastToken(email, 'password-reset');
   }
 
-  describe('richiesta (POST /auth/forgot-password)', () => {
+  describe('request (POST /auth/forgot-password)', () => {
     beforeEach(async () => {
       await createVerifiedUser(h, EMAIL);
     });
 
-    it("per un account esistente invia l'email con un token monouso", async () => {
+    it('for an existing account sends the email with a single-use token', async () => {
       await requestReset();
       expect(h.mail.to(EMAIL, 'password-reset')).toHaveLength(1);
     });
 
-    it("risposta identica (202, stesso corpo) per indirizzo esistente e inesistente, e nessuna email per l'inesistente", async () => {
+    it('identical response (202, same body) for an existing and a nonexistent address, and no email for the nonexistent one', async () => {
       const known = await forgotPassword(h, EMAIL);
       const unknown = await forgotPassword(h, 'ghost@example.com');
       await settle(h);
@@ -71,8 +71,8 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       expect(h.mail.to(EMAIL, 'password-reset')).toHaveLength(1);
     });
 
-    it('la risposta non aspetta il lavoro (nessuna differenza di tempi osservabile): e un lavoro in background', async () => {
-      h.mail.delayMs = 400; // SMTP lento: non deve ritardare la risposta
+    it('the response does not wait for the work (no observable timing difference): it is a background job', async () => {
+      h.mail.delayMs = 400; // slow SMTP: it must not delay the response
 
       const start = Date.now();
       const res = await forgotPassword(h, EMAIL);
@@ -80,11 +80,11 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       await settle(h);
 
       expect(res.status).toBe(202);
-      expect(elapsed).toBeLessThan(300); // l'invio lento (400 ms) non ritarda la risposta
+      expect(elapsed).toBeLessThan(300); // the slow send (400 ms) does not delay the response
       expect(h.mail.to(EMAIL, 'password-reset')).toHaveLength(1);
     });
 
-    it("nel database c'e' solo lo SHA-256 del token", async () => {
+    it('the database holds only the SHA-256 of the token', async () => {
       const token = await requestReset();
       const rows = await sql<{ tokenHash: string; type: string }>(
         h,
@@ -98,7 +98,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       ]);
     });
 
-    it('entro il periodo di attesa non invia una seconda email; dopo si, e il vecchio token smette di valere', async () => {
+    it('within the wait period it does not send a second email; after it, yes, and the old token stops being valid', async () => {
       const first = await requestReset();
       await forgotPassword(h, EMAIL);
       await settle(h);
@@ -114,7 +114,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       expect((await resetPassword(h, second, NEW_PASSWORD)).status).toBe(200);
     });
 
-    it("accetta l'email in qualsiasi forma (maiuscole/spazi)", async () => {
+    it('accepts the email in any form (case/spaces)', async () => {
       expect((await forgotPassword(h, '  MARIO@Example.COM ')).status).toBe(
         202,
       );
@@ -122,7 +122,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       expect(h.mail.to(EMAIL, 'password-reset')).toHaveLength(1);
     });
 
-    it('email non valida -> 400 di validazione', async () => {
+    it('invalid email -> 400 from validation', async () => {
       expect(
         (
           await http(h)
@@ -133,12 +133,12 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  describe('reimpostazione (POST /auth/reset-password)', () => {
+  describe('reset (POST /auth/reset-password)', () => {
     beforeEach(async () => {
       await createVerifiedUser(h, EMAIL);
     });
 
-    it('imposta la nuova password: la vecchia non vale piu, la nuova si', async () => {
+    it('sets the new password: the old one stops working, the new one works', async () => {
       const token = await requestReset();
 
       const res = await resetPassword(h, token, NEW_PASSWORD);
@@ -148,7 +148,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       expect((await login(h, EMAIL, NEW_PASSWORD)).status).toBe(200);
     });
 
-    it('il token e monouso: il secondo utilizzo fallisce con 400', async () => {
+    it('the token is single-use: the second use fails with 400', async () => {
       const token = await requestReset();
       expect((await resetPassword(h, token, NEW_PASSWORD)).status).toBe(200);
       expect((await resetPassword(h, token, 'Another-Passw0rd!')).status).toBe(
@@ -157,7 +157,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       expect((await login(h, EMAIL, NEW_PASSWORD)).status).toBe(200);
     });
 
-    it('token scaduto, sconosciuto o di un altro tipo -> 400', async () => {
+    it('expired, unknown or other-type token -> 400', async () => {
       const token = await requestReset();
       await h.db.query(
         `UPDATE auth_tokens SET "expiresAt" = now() - interval '1 minute'`,
@@ -167,7 +167,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
         (await resetPassword(h, 'x'.repeat(43), NEW_PASSWORD)).status,
       ).toBe(400);
 
-      // un token di verifica email non puo essere usato per reimpostare la password
+      // an email verification token cannot be used to reset the password
       await register(h, 'other@example.com');
       const verificationToken = h.mail.lastToken(
         'other@example.com',
@@ -178,7 +178,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       ).toBe(400);
     });
 
-    it('la password nuova deve rispettare le regole (8-72 caratteri) e il token non viene consumato', async () => {
+    it('the new password must follow the rules (8-72 characters) and the token is not consumed', async () => {
       const token = await requestReset();
       expect((await resetPassword(h, token, 'short')).status).toBe(400);
       expect((await resetPassword(h, token, 'x'.repeat(73))).status).toBe(400);
@@ -188,7 +188,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       expect((await resetPassword(h, token, NEW_PASSWORD)).status).toBe(200);
     });
 
-    it('con piu richieste concorrenti con lo stesso token ne riesce una sola', async () => {
+    it('with several concurrent requests with the same token only one succeeds', async () => {
       const token = await requestReset();
       const results = await Promise.all(
         ['A-Passw0rd-one!', 'B-Passw0rd-two!', 'C-Passw0rd-three!'].map((p) =>
@@ -198,7 +198,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       expect(results.map((r) => r.status).sort()).toEqual([200, 400, 400]);
     });
 
-    it("la nuova password e hashata (mai in chiaro) e non cambia l'email", async () => {
+    it('the new password is hashed (never in clear) and does not change the email', async () => {
       const token = await requestReset();
       await resetPassword(h, token, NEW_PASSWORD);
       const row = await userRow(h, EMAIL);
@@ -206,8 +206,8 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       expect(row?.password).not.toContain(NEW_PASSWORD);
     });
 
-    describe('invalida tutte le sessioni', () => {
-      it('refresh token e access token emessi prima non funzionano piu', async () => {
+    describe('invalidates all sessions', () => {
+      it('refresh tokens and access tokens issued earlier no longer work', async () => {
         const laptop = await loginSession(h, EMAIL);
         const phone = await loginSession(h, EMAIL);
         const before = await userRow(h, EMAIL);
@@ -233,7 +233,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
         expect(revoked[0].n).toBe(0);
       });
 
-      it('una nuova sessione dopo il reset funziona normalmente', async () => {
+      it('a new session after the reset works normally', async () => {
         await requestReset().then((token) =>
           resetPassword(h, token, NEW_PASSWORD),
         );
@@ -247,7 +247,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
         ).toBe(200);
       });
 
-      it('invalida anche i dispositivi riconosciuti (cookie trusted_device)', async () => {
+      it('also invalidates the recognized devices (trusted_device cookie)', async () => {
         const trusted = cookieValue(await login(h, EMAIL), 'trusted_device')!;
         const token = await requestReset();
         await resetPassword(h, token, NEW_PASSWORD);
@@ -261,7 +261,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       });
     });
 
-    it("sblocca l'account bloccato per troppi tentativi (via d'uscita per il proprietario)", async () => {
+    it('unlocks the account locked for too many attempts (a way out for the owner)', async () => {
       for (let i = 0; i < 5; i++) await login(h, EMAIL, 'Wrong-Passw0rd!');
       expect((await login(h, EMAIL, PASSWORD)).status).toBe(429);
 
@@ -272,7 +272,7 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
       expect(await sql(h, 'SELECT * FROM login_attempts')).toHaveLength(0);
     });
 
-    it('elimina i token di verifica e di reset ancora pendenti', async () => {
+    it('deletes the verification and reset tokens still pending', async () => {
       await register(h, 'pending@example.com');
       const token = await requestReset('pending@example.com');
       await resetPassword(h, token, NEW_PASSWORD);
@@ -284,20 +284,20 @@ describe('E - reset password (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  describe("chi possiede la casella recupera l'account", () => {
-    it("pre-hijacking: l'attaccante registra l'email della vittima; la vittima reimposta la password e l'account diventa suo", async () => {
-      await register(h, EMAIL, 'Attacker-Passw0rd!'); // account non verificato con la password dell'attaccante
+  describe('whoever owns the mailbox recovers the account', () => {
+    it("pre-hijacking: the attacker registers the victim's email; the victim resets the password and the account becomes theirs", async () => {
+      await register(h, EMAIL, 'Attacker-Passw0rd!'); // unverified account with the attacker's password
       expect((await login(h, EMAIL, 'Attacker-Passw0rd!')).status).toBe(403);
 
       const token = await requestReset();
       expect((await resetPassword(h, token, NEW_PASSWORD)).status).toBe(200);
 
-      expect((await login(h, EMAIL, 'Attacker-Passw0rd!')).status).toBe(401); // la password dell'attaccante non vale piu
+      expect((await login(h, EMAIL, 'Attacker-Passw0rd!')).status).toBe(401); // the attacker's password is no longer valid
       expect((await login(h, EMAIL, NEW_PASSWORD)).status).toBe(200);
-      expect((await userRow(h, EMAIL))?.emailVerifiedAt).not.toBeNull(); // il reset dimostra il possesso della casella
+      expect((await userRow(h, EMAIL))?.emailVerifiedAt).not.toBeNull(); // the reset proves ownership of the mailbox
     });
 
-    it('un account solo-Google puo impostare una password: diventa combined e Google continua a funzionare', async () => {
+    it('a Google-only account can set a password: it becomes combined and Google keeps working', async () => {
       await googleLogin(h.app, h.google, {
         sub: 'g-1',
         email: EMAIL,

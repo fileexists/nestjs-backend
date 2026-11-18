@@ -1,186 +1,225 @@
-# Progetto: autenticazione Bearer per le API pubbliche (widget)
+# Project: Bearer authentication for the public APIs (widget)
 
-> **Stato: solo progettazione.** Nulla di quanto descritto qui è implementato. Il flusso a cookie per lo
-> staff (login, refresh, logout, Google) **non cambia**.
+> **Status: design only.** Nothing described here is implemented. The cookie flow for staff (login, refresh,
+> logout, Google) **does not change**; the only part already in production, mentioned as a reference, is the
+> immediate revocation of staff sessions (see section 15).
 
-## 1. Problema
+## 1. Problem
 
-Il widget gira sui siti dei clienti, quindi su un **dominio diverso** da quello dell'API. Le richieste del
-widget sono *cross-site*: i cookie `sameSite=lax` (quelli usati oggi per lo staff) **non vengono inviati**.
-Servono quindi credenziali che viaggino in un header, legate al **negozio** e **separate dal login utente**.
+The widget runs on the customers' websites, so on a **different domain** from the API. The widget's requests
+are *cross-site*: the `sameSite=lax` cookies (the ones staff use today) **are not sent**.
+So we need credentials that travel in a header, tied to the **store** and **separate from the user login**.
 
-Non si risolve con `SameSite=None; Secure`: i browser bloccano sempre più spesso i cookie di terze parti
-(Safari ITP, Chrome), esporrebbe a CSRF e legherebbe il widget a una sessione utente che non esiste (il
-visitatore del sito del cliente non è un utente dello staff).
+It is not solved with `SameSite=None; Secure`: browsers increasingly block third-party cookies
+(Safari ITP, Chrome), it would expose us to CSRF and it would tie the widget to a user session that does not exist (the
+visitor of the customer's site is not a staff user).
 
-## 2. Obiettivi e non-obiettivi
+## 2. Goals and non-goals
 
-| Obiettivo | Non-obiettivo |
+| Goal | Non-goal |
 | --- | --- |
-| Identificare **quale negozio** chiama le API pubbliche | Autenticare il singolo visitatore finale (fuori ambito) |
-| Chiavi revocabili, ruotabili, con scope minimi | Sostituire o modificare il login staff |
-| Funzionare senza cookie, da qualsiasi origine autorizzata | Proteggere da chi controlla il sito del cliente |
-| Limitare l'abuso (rate limit per chiave) | Garantire che una chiave pubblica resti segreta (non può) |
+| Identify **which store** is calling the public APIs | Authenticate the individual end visitor (out of scope) |
+| Revocable, rotatable keys with minimal scopes | Replace or change the staff login |
+| Work without cookies, from any authorized origin | Protect against whoever controls the customer's site |
+| Limit abuse (per-key rate limit) | Guarantee that a public key stays secret (it cannot) |
 
-## 3. Modello: due tipi di chiave
+## 3. Model: two kinds of key
 
 | | **Publishable** (`pk_live_…`) | **Secret** (`sk_live_…`) |
 | --- | --- | --- |
-| Dove vive | Incorporata nel widget, **visibile a chiunque** | Solo sul server del cliente |
-| Cosa può fare | Solo operazioni di lettura/azioni del widget | Integrazioni server-to-server, scope più ampi |
-| Controllo `Origin` | **Sì**, lista di origini consentite per chiave | No (non arriva da un browser) |
-| Esposizione accettata | Alta: va pensata come pubblica | Mai nel browser, mai nei log |
+| Where it lives | Embedded in the widget, **visible to anyone** | Only on the customer's server |
+| What it can do | Only the widget's read operations/actions | Server-to-server integrations, wider scopes |
+| `Origin` check | **Yes**, list of allowed origins per key | No (it does not come from a browser) |
+| Accepted exposure | High: assume it is public | Never in the browser, never in the logs |
 
-Una chiave `pk_` **non è un segreto**: chiunque apra gli strumenti del browser la legge. La sua protezione è
-(1) privilegi minimi, (2) vincolo di origine, (3) rate limit, (4) revoca rapida. Per questo non si usa per
-nulla di sensibile: operazioni sensibili richiedono `sk_` lato server.
+A `pk_` key is **not a secret**: anyone who opens the browser tools can read it. Its protection is
+(1) minimal privileges, (2) origin binding, (3) rate limit, (4) fast revocation. That is why it is not used for
+anything sensitive: sensitive operations require an `sk_` on the server side.
 
-### Formato
+### Format
 
 ```
-pk_live_<prefisso 8 car>_<segreto 32 byte base64url>
+pk_live_<8-char prefix>_<32-byte secret, base64url>
 ```
 
-- il **prefisso** non segreto serve a riconoscere la chiave in dashboard e nei log;
-- nel database si salva solo `SHA-256(chiave completa)`: la chiave ha 256 bit di entropia, quindi un hash
-  veloce è sufficiente (bcrypt qui sarebbe solo un costo per ogni richiesta);
-- il prefisso `sk_live_` rende la chiave riconoscibile dai sistemi di *secret scanning* (es. GitHub).
+- the non-secret **prefix** is used to recognize the key in the dashboard and in the logs;
+- only `SHA-256(full key)` is stored in the database: the key has 256 bits of entropy, so a fast hash
+  is enough (bcrypt here would just be a cost on every request);
+- the `sk_live_` prefix makes the key recognizable to *secret scanning* systems (e.g. GitHub).
 
-## 4. Dati
+## 4. Data
 
-Oggi **non esiste** un'entità negozio: va definita (`stores`). Tabelle nuove, con migrazioni in
-`database/migrations/` (mai `synchronize`):
+Today there is **no** store entity: it has to be defined (`stores`). New tables, with migrations in
+`database/migrations/` (never `synchronize`):
 
 ```
 stores            id uuid PK, name, createdAt, …
 api_keys          id uuid PK
                   storeId uuid FK → stores ON DELETE CASCADE
-                  name varchar            -- etichetta scelta dallo staff
+                  name varchar            -- label chosen by staff
                   type  'publishable' | 'secret'
-                  keyPrefix varchar(8)    -- non segreto
-                  keyHash   varchar(64) UNIQUE  -- sha256 della chiave completa
-                  scopes text[]           -- es. widget:read, widget:write
-                  allowedOrigins text[]   -- solo publishable; origini esatte (https://shop.example.com)
+                  keyPrefix varchar(8)    -- not secret
+                  keyHash   varchar(64) UNIQUE  -- sha256 of the full key
+                  scopes text[]           -- e.g. widget:read, widget:write
+                  allowedOrigins text[]   -- publishable only; exact origins (https://shop.example.com)
                   rateLimitPerMinute int
                   expiresAt timestamptz NULL
                   lastUsedAt timestamptz NULL
                   revokedAt  timestamptz NULL
                   createdBy uuid FK → users
                   createdAt timestamptz
-api_key_events    audit: creata / revocata / usata da IP nuovo / richiesta con Origin non ammessa
+api_key_events    audit: created / revoked / used from a new IP / request with a disallowed Origin
 ```
 
-Una chiave è valida se `revokedAt IS NULL` e `expiresAt` nel futuro o nullo.
+A key is valid if `revokedAt IS NULL` and `expiresAt` is in the future or null.
 
-## 5. Trasporto e verifica
+## 5. Transport and verification
 
 ```
 Authorization: Bearer pk_live_ab12cd34_…
-Origin: https://shop.example.com          (inviato dal browser)
+Origin: https://shop.example.com          (sent by the browser)
 ```
 
-1. Il guard estrae il Bearer, calcola `SHA-256`, cerca `keyHash` (indice univoco) con un confronto a tempo
-   costante; chiave inesistente, revocata o scaduta → **sempre lo stesso 401**, senza dire quale caso.
-2. Per le `pk_`: l'header `Origin` **deve** essere in `allowedOrigins` della chiave (confronto esatto, niente
-   wildcard sui sottodomini); altrimenti 403 e un evento di audit. Richiesta senza `Origin` con `pk_` → 403.
-3. Si controllano gli **scope** richiesti dalla rotta.
-4. Si applica il rate limit **per chiave** (non solo per IP) e si aggiorna `lastUsedAt` in modo asincrono.
-5. Si valorizzano `request.apiKey = { id, storeId, scopes }`: da qui in poi il codice ragiona **per negozio**.
+1. The guard extracts the Bearer token, computes `SHA-256`, looks up `keyHash` (unique index) with a
+   constant-time comparison; a non-existent, revoked or expired key → **always the same 401**, without saying which case.
+2. For `pk_` keys: the `Origin` header **must** be in the key's `allowedOrigins` (exact comparison, no
+   wildcards on subdomains); otherwise 403 and an audit event. A request without `Origin` using a `pk_` → 403.
+3. The **scopes** required by the route are checked.
+4. The **per-key** rate limit is applied (not just per IP) and `lastUsedAt` is updated asynchronously.
+5. `request.apiKey = { id, storeId, scopes }` is set: from here on the code reasons **per store**.
 
-Le chiavi **non** viaggiano mai in query string (finirebbero nei log e nel `Referer`) e non si accettano
-cookie su queste rotte.
+Keys **never** travel in the query string (they would end up in the logs and in the `Referer`) and cookies
+are not accepted on these routes.
 
 ## 6. CORS
 
-La *preflight* (`OPTIONS`) **non porta l'`Authorization`**, quindi non si può risolvere la chiave per decidere
-l'origine. Soluzione in due livelli:
+The *preflight* (`OPTIONS`) **does not carry the `Authorization` header**, so the key cannot be resolved to decide
+the origin. Solution on two levels:
 
-- livello CORS: lista globale = **unione delle `allowedOrigins` delle chiavi attive** (cache con TTL 30–60 s),
-  solo per le rotte `/public/v1/*`; risposta con `Access-Control-Allow-Origin: <origine>` (mai `*` con
-  credenziali), `Access-Control-Allow-Headers: Authorization, Content-Type`, `Vary: Origin`;
-- livello chiave: il controllo puntuale del punto 5.2 sulla richiesta vera.
+- CORS level: global list = **union of the `allowedOrigins` of the active keys** (cache with a 30–60 s TTL),
+  only for the `/public/v1/*` routes; response with `Access-Control-Allow-Origin: <origin>` (never `*` with
+  credentials), `Access-Control-Allow-Headers: Authorization, Content-Type`, `Vary: Origin`;
+- key level: the precise check of point 5.2 on the real request.
 
-**Niente `Access-Control-Allow-Credentials`** su queste rotte: non ci sono cookie. Il CORS dello staff
-(`CORS_ORIGIN`, con `credentials: true`) resta separato e invariato.
+**No `Access-Control-Allow-Credentials`** on these routes: there are no cookies. The staff CORS
+(`CORS_ORIGIN`, with `credentials: true`) stays separate and unchanged.
 
-## 7. Separazione dal login utente
+## 7. Separation from the user login
 
-- Namespace distinto: **`/api/public/v1/*`** per il widget, `/api/*` come oggi per lo staff.
-- Un **guard dedicato** (`ApiKeyGuard`, decoratore `@ApiKeyAuth('scope')`) accanto all'`AuthGuard` esistente.
-  Una rotta è *o* staff *o* pubblica, mai entrambe; l'`AuthGuard` globale salta le rotte `@ApiKeyAuth`.
-- Un JWT staff **non** è accettato su `/public/v1` e una chiave API **non** autentica rotte staff
-  (claim/prefisso diversi: non si possono confondere).
-- La gestione delle chiavi è **una funzione dello staff**, quindi usa il flusso a cookie esistente e i
-  permessi (`@Permissions('ADMIN')` o un permesso `STORE_ADMIN` dedicato).
+- Distinct namespace: **`/api/public/v1/*`** for the widget, `/api/*` as today for staff.
+- A **dedicated guard** (`ApiKeyGuard`, `@ApiKeyAuth('scope')` decorator) next to the existing `AuthGuard`.
+  A route is *either* staff *or* public, never both; the global `AuthGuard` skips the `@ApiKeyAuth` routes.
+- A staff JWT is **not** accepted on `/public/v1` and an API key does **not** authenticate staff routes
+  (different claims/prefix: they cannot be mixed up).
+- Key management is **a staff feature**, so it uses the existing cookie flow and the
+  permissions (`@Permissions('ADMIN')` or a dedicated `STORE_ADMIN` permission).
 
-## 8. Gestione delle chiavi (staff)
+## 8. Key management (staff)
 
-| Endpoint | Cosa fa |
+| Endpoint | What it does |
 | --- | --- |
-| `POST /api/stores/:id/api-keys` | Crea la chiave. La mostra **una sola volta** in chiaro |
-| `GET /api/stores/:id/api-keys` | Elenco: prefisso, tipo, scope, origini, `lastUsedAt`. Mai la chiave |
-| `PATCH /api/stores/:id/api-keys/:keyId` | Cambia nome, scope, origini, limite |
-| `DELETE /api/stores/:id/api-keys/:keyId` | Revoca (`revokedAt`), effetto entro il TTL della cache (≤ 60 s) |
+| `POST /api/stores/:id/api-keys` | Creates the key. Shows it **only once** in plain text |
+| `GET /api/stores/:id/api-keys` | List: prefix, type, scopes, origins, `lastUsedAt`. Never the key |
+| `PATCH /api/stores/:id/api-keys/:keyId` | Changes name, scopes, origins, limit |
+| `DELETE /api/stores/:id/api-keys/:keyId` | Revokes (`revokedAt`), takes effect within the cache TTL (≤ 60 s) |
 
-**Rotazione senza interruzioni:** un negozio può avere due chiavi attive per tipo; si crea la nuova, si
-aggiorna il widget, si revoca la vecchia. Scadenza (`expiresAt`) opzionale, consigliata per le `sk_`.
+**Rotation without downtime:** a store can have two active keys per type; create the new one, update the
+widget, revoke the old one. Expiry (`expiresAt`) is optional, recommended for `sk_` keys.
 
-## 9. Sessioni brevi per il widget (consigliato, fase 2)
+## 9. Short-lived widget sessions (recommended, phase 2)
 
-Una `pk_` fissa e pubblica è facile da copiare e riusare. Per ridurre l'esposizione:
+A fixed, public `pk_` is easy to copy and reuse. To reduce the exposure:
 
-1. il widget chiama `POST /api/public/v1/sessions` con la `pk_` (e `Origin` valida);
-2. riceve un **token Bearer a vita breve** (5–15 min), firmato, con `storeId`, scope e id chiave;
-3. le chiamate successive usano quel token; alla scadenza ne chiede uno nuovo.
+1. the widget calls `POST /api/public/v1/sessions` with the `pk_` (and a valid `Origin`);
+2. it receives a **short-lived Bearer token** (5–15 min), signed, with `storeId`, scopes and key id;
+3. the following calls use that token; when it expires it asks for a new one.
 
-Così la `pk_` si usa pochissimo, la revoca della chiave ferma anche i token già emessi (si controlla l'id chiave
-a ogni richiesta, come oggi `tokenVersion`) e si può aggiungere una verifica anti-bot proprio su questo
-endpoint (CAPTCHA/Turnstile) senza toccare il resto.
+This way the `pk_` is used very rarely, revoking the key also stops the tokens already issued (the key id is
+checked on every request, like `tokenVersion` and the session family today, see section 15) and an anti-bot
+check (CAPTCHA/Turnstile) can be added on this endpoint alone without touching the rest.
 
-## 10. Sicurezza: riepilogo
+## 10. Security: summary
 
-- hash `SHA-256` della chiave, confronto a tempo costante, nessuna chiave in chiaro nei log o nel database;
-- risposte uniformi (stesso 401) e nessun indizio su chiavi esistenti;
-- rate limit per chiave + per IP; quote e allarmi su picchi anomali;
-- `Cache-Control: no-store` sulle risposte che contengono una chiave appena creata;
-- solo HTTPS; `Referrer-Policy` e CSP già gestiti da Helmet;
-- revoca rapida (cache breve) e audit di creazione, revoca e usi sospetti;
-- limite onesto: il controllo `Origin` ferma l'uso da **altri siti nel browser**, non da uno script server-side
-  (può mandare l'header che vuole). Per questo la `pk_` ha privilegi minimi e rate limit, e le azioni
-  sensibili stanno dietro a `sk_`.
+- `SHA-256` hash of the key, constant-time comparison, no plain-text key in the logs or in the database;
+- uniform responses (same 401) and no hint about existing keys;
+- per-key + per-IP rate limit; quotas and alerts on abnormal spikes;
+- `Cache-Control: no-store` on the responses that contain a newly created key;
+- HTTPS only; `Referrer-Policy` and CSP already handled by Helmet;
+- fast revocation (short cache) and audit of creation, revocation and suspicious uses;
+- honest limit: the `Origin` check stops use from **other sites in the browser**, not from a server-side script
+  (which can send whatever header it likes). That is why the `pk_` has minimal privileges and a rate limit, and sensitive
+  actions sit behind `sk_`.
 
-## 11. Piano di implementazione (fasi)
+## 11. Implementation plan (phases)
 
-1. **Dati**: `stores`, `api_keys`, `api_key_events` + migrazioni + entità.
-2. **Servizio chiavi**: generazione, hash, creazione/revoca/rotazione, cache di validazione.
-3. **Guard e decoratore**: `ApiKeyGuard`, `@ApiKeyAuth()`, rate limit per chiave (tracker personalizzato del throttler).
-4. **CORS dinamico** per `/public/v1/*` e verifica dell'`Origin` per chiave.
-5. **Endpoint di gestione** per lo staff (+ Swagger).
-6. **Sessioni brevi** del widget (+ anti-bot).
-7. **Osservabilità**: metriche per chiave, allarmi, retention dell'audit.
+1. **Data**: `stores`, `api_keys`, `api_key_events` + migrations + entities.
+2. **Key service**: generation, hashing, creation/revocation/rotation, validation cache.
+3. **Guard and decorator**: `ApiKeyGuard`, `@ApiKeyAuth()`, per-key rate limit (custom throttler tracker).
+4. **Dynamic CORS** for `/public/v1/*` and per-key `Origin` verification.
+5. **Management endpoints** for staff (+ Swagger).
+6. **Short widget sessions** (+ anti-bot).
+7. **Observability**: per-key metrics, alerts, audit retention.
 
-## 12. Test previsti
+## 12. Planned tests
 
-- unitari: formato/hash delle chiavi, confronto, scope, `Origin` esatto (niente `evil.com`, niente
-  `shop.example.com.evil.com`), cache e revoca;
-- e2e su PostgreSQL vero: chiave valida/scaduta/revocata (stesso 401), `Origin` non ammessa, scope mancante,
-  rate limit per chiave, preflight CORS, un JWT staff **non** passa su `/public/v1` e viceversa, rotazione con
-  due chiavi attive, chiave mostrata una volta sola;
-- sicurezza: nessuna chiave nei log, nessun cookie accettato sulle rotte pubbliche.
+- unit: key format/hash, comparison, scopes, exact `Origin` (no `evil.com`, no
+  `shop.example.com.evil.com`), cache and revocation;
+- e2e on a real PostgreSQL: valid/expired/revoked key (same 401), disallowed `Origin`, missing scope,
+  per-key rate limit, CORS preflight, a staff JWT does **not** pass on `/public/v1` and vice versa, rotation with
+  two active keys, key shown only once;
+- security: no key in the logs, no cookie accepted on the public routes.
 
-## 13. Alternative scartate
+## 13. Discarded alternatives
 
-| Alternativa | Perché no |
+| Alternative | Why not |
 | --- | --- |
-| Cookie `SameSite=None; Secure` | Cookie di terze parti sempre più bloccati; espone a CSRF; non ha senso per un visitatore non utente |
-| OAuth2 *client credentials* | Adatto a server-to-server, ma il widget gira nel browser: servirebbe comunque una credenziale pubblica |
-| Un solo JWT firmato per negozio | Non revocabile senza stato lato server e lungo da ruotare |
-| mTLS | Impossibile da usare da un widget nel browser |
+| `SameSite=None; Secure` cookie | Third-party cookies are increasingly blocked; exposes to CSRF; makes no sense for a visitor who is not a user |
+| OAuth2 *client credentials* | Suited to server-to-server, but the widget runs in the browser: a public credential would still be needed |
+| A single signed JWT per store | Not revocable without server-side state and slow to rotate |
+| mTLS | Impossible to use from a widget in the browser |
 
-## 14. Domande aperte
+## 14. Open questions
 
-1. Quali sono le operazioni del widget (scope reali)? Servono solo letture o anche scritture (es. invio messaggi)?
-2. Un negozio può avere più domini (staging, produzione)? Se sì, `allowedOrigins` multiple per chiave.
-3. Serve distinguere i **visitatori** del sito del cliente (es. conversazioni) o basta il negozio?
-4. Quote/piani per negozio (rate limit diversi per tariffa)?
-5. Chi può creare chiavi: solo `ADMIN` o anche il titolare del negozio (permesso dedicato)?
+1. What are the widget's operations (real scopes)? Are only reads needed, or also writes (e.g. sending messages)?
+2. Can a store have several domains (staging, production)? If so, multiple `allowedOrigins` per key.
+3. Do we need to distinguish the **visitors** of the customer's site (e.g. conversations) or is the store enough?
+4. Quotas/plans per store (different rate limits per tariff)?
+5. Who can create keys: only `ADMIN` or also the store owner (dedicated permission)?
+
+## 15. Reference: immediate revocation of staff sessions (already implemented)
+
+It is not part of the key design, but it is the revocation model to follow:
+
+- every login opens a **family** of refresh tokens (`fid`); the access token carries the same `fid` and `tokenVersion`;
+- on every request a single query checks that the family belongs to the user, is not revoked and not expired, and that
+  `tokenVersion` matches. So logging out of one device, logout-all, reuse of a refresh token and a password
+  reset invalidate the access token **immediately** (even if it was copied), without touching the other devices
+  when only one is logged out;
+- after a rotation the old refresh tokens are only "used", not revoked: the family stays active;
+- an access token without `fid` (issued before this change) is rejected with 401: on deploy a
+  refresh (`POST /api/auth/refresh`) or a new login is enough;
+- cost: one indexed query per request (the same one as before, not an extra one). **No in-memory cache**:
+  with several instances it cannot be invalidated everywhere, and revocation would no longer be immediate. For the API keys (section 8)
+  a short cache is instead an accepted trade-off from the start (revocation within the TTL).
+
+### Refresh, configuration and per-instance state
+
+- **Idempotent refresh:** inside `REFRESH_REUSE_GRACE_SECONDS`, a second use of the same refresh token gets
+  the same pair of tokens as the first rotation (cached per `jti` in memory, dropped on logout, logout-all, password
+  reset and a detected replay). The inside/outside decision is made in SQL with the database clock. After the
+  window, reuse detection is unchanged (family revoked + `tokenVersion + 1`). Trade-off: inside the window whoever
+  holds the refresh token gets the pair, hence the short default.
+- **Per-instance state:** the throttler counters, the refresh cache above and the hourly cleanup cron live in each
+  instance. With *N* instances the rate limits are up to *N* times higher, the refresh is idempotent only when the
+  parallel requests reach the same instance, and the cleanup runs *N* times (idempotent deletes). Any shared
+  behaviour (a global rate limit, a shared refresh cache) would need an external store such as Redis.
+- **Production configuration:** `CORS_ORIGIN` is required, https only and never `*`; `/docs` is off unless
+  `SWAGGER_ENABLED=true`; `TRUST_PROXY` is the number of trusted proxy hops (default 1, `0` when there is no proxy).
+- **Guards:** the global guards run as `ThrottlerGuard` → `AuthGuard` → `PermissionsGuard`, so rejected requests
+  still count towards the rate limit. `PermissionsGuard` reads `@Permissions()` from the method and then the class
+  (the method wins); `*` is a wildcard only in the required permission and every other character is literal.
+- **Email delivery:** emails are sent in the background with 3 attempts (2 s, 10 s). There is no persistent queue: an
+  email that keeps failing, or is in flight when the process is killed, is lost. On shutdown the app waits up to 20 s
+  for the queued ones (`AccountService.onApplicationShutdown`).
+- **Request ids:** `X-Request-Id` from the client is kept only if it matches `^[A-Za-z0-9-]{1,64}$`, otherwise a UUID
+  is generated; the id is in every error log line, guard rejections included.

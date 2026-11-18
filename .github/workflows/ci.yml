@@ -7,7 +7,7 @@ on:
   pull_request:
     paths-ignore: ['**.md', 'docs/**']
 
-# Una nuova esecuzione sullo stesso ref annulla quella in corso: risparmia minuti.
+# A new run on the same ref cancels the one in progress: saves minutes.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -35,12 +35,12 @@ jobs:
       - name: Unit tests
         run: yarn test
 
-      - name: E2E tests (repository mockati)
+      - name: E2E tests (mocked repositories)
         run: yarn test:e2e
 
-  # E2E contro un PostgreSQL VERO. Il database gira come service container sul
-  # runner stesso (locale, quindi veloce, nessun DB remoto e nessun segreto):
-  # lo schema viene ricreato dalle migrazioni a ogni esecuzione.
+  # E2E against a REAL PostgreSQL. The database runs as a service container on the
+  # runner itself (local, so fast, no remote DB and no secrets):
+  # the schema is recreated from the migrations on every run.
   e2e-db:
     runs-on: ubuntu-latest
     services:
@@ -57,7 +57,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-      # SMTP vero (Mailpit): usato dal test di integrazione dell'invio email.
+      # Real SMTP (Mailpit): used by the email sending integration test.
       mailpit:
         image: axllent/mailpit:v1.21
         ports:
@@ -79,5 +79,5 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      - name: E2E tests (PostgreSQL reale)
+      - name: E2E tests (real PostgreSQL)
         run: yarn test:e2e:db

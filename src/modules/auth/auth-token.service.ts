@@ -8,8 +8,8 @@ import {
 } from '../../common/entities/auth-token.entity';
 
 /**
- * Token monouso con scadenza (verifica email, reset password).
- * Il token in chiaro esiste solo nell'email: nel database c'e' solo lo SHA-256.
+ * Single-use token with an expiry (email verification, password reset).
+ * The plain token only exists in the email: the database only holds the SHA-256.
  */
 @Injectable()
 export class AuthTokenService {
@@ -22,7 +22,7 @@ export class AuthTokenService {
     return createHash('sha256').update(rawToken).digest('hex');
   }
 
-  /** Crea un token nuovo; quelli non ancora usati dello stesso tipo vengono invalidati. */
+  /** Creates a new token; the unused ones of the same type are invalidated. */
   async issue(
     userId: string,
     type: AuthTokenType,
@@ -40,9 +40,9 @@ export class AuthTokenService {
   }
 
   /**
-   * Consuma il token in modo atomico (un solo UPDATE condizionale): due richieste
-   * concorrenti con lo stesso token non possono riuscire entrambe.
-   * Ritorna lo userId, oppure null se il token e' sconosciuto, scaduto o gia' usato.
+   * Consumes the token atomically (a single conditional UPDATE): two concurrent
+   * requests with the same token cannot both succeed.
+   * Returns the userId, or null if the token is unknown, expired or already used.
    */
   async consume(rawToken: string, type: AuthTokenType): Promise<string | null> {
     const result = await this.repository
@@ -59,7 +59,7 @@ export class AuthTokenService {
     return rows[0]?.userId ?? null;
   }
 
-  /** Token piu' recente non ancora usato (serve a limitare i reinvii). */
+  /** Most recent unused token (used to limit resends). */
   findLatestActive(
     userId: string,
     type: AuthTokenType,
@@ -70,14 +70,14 @@ export class AuthTokenService {
     });
   }
 
-  /** Invalida tutti i token non usati dell'utente (opzionalmente di un solo tipo). */
+  /** Invalidates all the user's unused tokens (optionally of a single type). */
   async invalidateAll(userId: string, type?: AuthTokenType): Promise<void> {
     await this.repository.delete(
       type ? { userId, type, usedAt: IsNull() } : { userId, usedAt: IsNull() },
     );
   }
 
-  /** Pulizia periodica: elimina i token scaduti. Ritorna quanti ne ha rimossi. */
+  /** Periodic cleanup: deletes the expired tokens. Returns how many were removed. */
   async deleteExpired(): Promise<number> {
     const result = await this.repository.delete({
       expiresAt: LessThan(new Date()),

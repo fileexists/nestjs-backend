@@ -19,6 +19,7 @@ import { PermissionService } from '../permission/permission.service';
 import { AccountService } from './account.service';
 import { AuthTokenService } from './auth-token.service';
 import { RefreshTokenService } from './refresh-token.service';
+import { RefreshResultCache } from './refresh-result-cache';
 import { parseDurationMs } from '../../common/utils/duration';
 import { GoogleAuthException } from './google-auth.exception';
 import { AuthTokenType } from '../../common/entities/auth-token.entity';
@@ -37,15 +38,21 @@ import {
 } from './trusted-device';
 import { TokenPayload } from '../../common/interfaces/jwt-payload.interface';
 
-/** Percorso del cookie del refresh token: solo le rotte di autenticazione. */
+/** Path of the refresh token cookie: only the authentication routes. */
 export const REFRESH_COOKIE_PATH = `/${GLOBAL_PREFIX}/auth`;
 
-/** Tetto ai confronti di riempimento (2^5 - 1): oltre, pareggiare il costo non ha piu' senso. */
+/** Cap on the padding compares (2^5 - 1): beyond that, equalizing the cost no longer makes sense. */
 const MAX_COST_PADDING_COMPARES = 31;
 
-/** Risposta identica per email nuova ed email gia' registrata (nessun indizio sull'esistenza dell'account). */
+/** Identical response for a new and an already registered email (no hint about whether the account exists). */
 export const REGISTRATION_ACCEPTED_MESSAGE =
   'If the address can be registered, an email with the next steps has been sent. Check your inbox.';
+
+/** The pair of tokens a rotation hands out. */
+export interface RefreshedTokens {
+  token: string;
+  refreshToken: string;
+}
 
 @Injectable()
 export class AuthService {
@@ -54,12 +61,18 @@ export class AuthService {
   private readonly refreshTokenSecret: string;
   private readonly jwtExpiration: string;
   private readonly refreshTokenExpiration: string;
-  /** Costo bcrypt (BCRYPT_ROUNDS, default 12). */
+  /** bcrypt cost (BCRYPT_ROUNDS, default 12). */
   private readonly bcryptRounds: number;
-  /** Hash fittizi (uno per costo): per confrontare comunque una password se l'utente non esiste. */
+  /** Dummy hashes (one per cost): to compare a password anyway when the user does not exist. */
   private readonly dummyHashes = new Map<number, Promise<string>>();
-  /** Tolleranza (ms) per il riuso di un refresh token appena ruotato (richieste parallele). 0 = nessuna. */
-  private readonly reuseGraceMs: number;
+  /** Tolerance (s) for reusing a refresh token that was just rotated (parallel requests). 0 = none. */
+  private readonly reuseGraceSeconds: number;
+  /**
+   * The pair issued by each rotation, kept for the grace period so that a second use of the same
+   * refresh token gets the same tokens instead of a 401. Per process: with several instances a
+   * request that lands on another one is only rejected (never treated as theft inside the grace).
+   */
+  private readonly rotations: RefreshResultCache<RefreshedTokens>;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -90,17 +103,17 @@ export class AuthService {
     this.bcryptRounds = Number(
       this.configService.get<number>('BCRYPT_ROUNDS') ?? 12,
     );
-    this.reuseGraceMs =
-      Number(
-        this.configService.get<number>('REFRESH_REUSE_GRACE_SECONDS') ?? 10,
-      ) * 1000;
+    this.reuseGraceSeconds = Number(
+      this.configService.get<number>('REFRESH_REUSE_GRACE_SECONDS') ?? 10,
+    );
+    this.rotations = new RefreshResultCache(this.reuseGraceSeconds * 1000);
   }
 
   async hashPassword(password: string): Promise<string> {
     return bcrypt.hash(password, this.bcryptRounds);
   }
 
-  /** Hash di una password casuale al costo indicato (calcolato una volta sola per costo). */
+  /** Hash of a random password at the given cost (computed only once per cost). */
   private getDummyHash(rounds = this.bcryptRounds): Promise<string> {
     let hash = this.dummyHashes.get(rounds);
     if (!hash) {
@@ -111,17 +124,17 @@ export class AuthService {
   }
 
   /**
-   * Un hash piu' economico di quello configurato (account creati prima di alzare BCRYPT_ROUNDS)
-   * si verifica molto prima dell'hash fittizio usato per gli indirizzi inesistenti: la differenza
-   * di tempo rivelerebbe quali email hanno un account. Si ripete quindi il confronto su un hash
-   * fittizio dello stesso costo, fino a pareggiare il lavoro.
+   * A hash cheaper than the configured one (accounts created before BCRYPT_ROUNDS was raised)
+   * is verified much sooner than the dummy hash used for non-existent addresses: the time
+   * difference would reveal which emails have an account. So the compare is repeated on a
+   * dummy hash of the same cost, until the work is evened out.
    */
   private async equalizeCost(storedHash: string): Promise<void> {
     let rounds: number;
     try {
       rounds = bcrypt.getRounds(storedHash);
     } catch {
-      return; // non e' un hash bcrypt: il confronto vero ha gia' fallito subito
+      return; // not a bcrypt hash: the real compare has already failed immediately
     }
     if (rounds >= this.bcryptRounds) return;
     const missing = Math.min(
@@ -141,22 +154,29 @@ export class AuthService {
     return bcrypt.compare(plainPassword, hashedPassword);
   }
 
-  /** Access token: porta `tokenVersion`, cosi' logout-all, reuse e reset password lo invalidano subito. */
-  async generateJwtToken(user: TokenPayload): Promise<string> {
+  /**
+   * Access token: carries `tokenVersion` (logout-all, reuse and password reset invalidate it immediately)
+   * and `fid`, the session family (logging out of a single device revokes that family).
+   */
+  async generateJwtToken(
+    user: TokenPayload,
+    familyId: string,
+  ): Promise<string> {
     return this.jwtService.signAsync(
       {
         id: user.id,
         email: user.email,
         tokenVersion: user.tokenVersion ?? 0,
+        fid: familyId,
       },
       { secret: this.jwtSecret, expiresIn: this.jwtExpiration as StringValue },
     );
   }
 
   /**
-   * Emette un refresh token e lo registra in `refresh_tokens` (solo l'hash del jti).
-   * Senza `familyId` inizia una nuova sessione (login); alla rotazione si passa
-   * quello della sessione esistente.
+   * Issues a refresh token and records it in `refresh_tokens` (only the hash of the jti).
+   * Without `familyId` it starts a new session (login); on rotation the one of the
+   * existing session is passed in.
    */
   async generateRefreshToken(
     user: TokenPayload,
@@ -201,31 +221,37 @@ export class AuthService {
   }
 
   /**
-   * Un access token firmato correttamente vale solo finche' la sessione e' quella
-   * attuale: se l'utente non esiste piu' o `tokenVersion` e' cambiato (logout-all,
-   * reuse detection, reset password) il token e' rifiutato subito, senza aspettare la scadenza.
+   * A correctly signed access token is only valid while the session is the current one:
+   * its family (`fid`) must belong to the user, not be revoked and not be expired, and `tokenVersion`
+   * must match. So logout (of one device or all), reuse detection and password reset
+   * invalidate it immediately, without waiting for it to expire. A token without `fid` (issued
+   * before this check) is rejected: a refresh is enough to get a new one. A single query.
    */
   async assertSessionCurrent(payload: TokenPayload): Promise<void> {
-    const state = payload.id
-      ? await this.userService.getAuthState(payload.id)
-      : null;
+    const session =
+      payload.id && payload.fid
+        ? await this.refreshTokenService.findActiveSession(
+            payload.id,
+            payload.fid,
+          )
+        : null;
     if (
-      !state ||
+      !session ||
       payload.tokenVersion === undefined ||
-      payload.tokenVersion !== state.tokenVersion
+      payload.tokenVersion !== session.tokenVersion
     ) {
       throw new UnauthorizedException('User is not authenticated.');
     }
   }
 
   /**
-   * Rotazione: il refresh token presentato viene marcato come usato e ne esce
-   * uno nuovo della stessa famiglia. Se arriva un token GIA' usato (furto/replay)
-   * si revoca l'intera famiglia e si invalidano le sessioni dell'utente.
+   * Rotation: the presented refresh token is marked as used and a new one of the same
+   * family comes out. Parallel requests with the same token (several tabs, many API calls after
+   * the access token expired) get the SAME pair: inside the grace period a second use is answered
+   * from memory, not with an error. Past it, an ALREADY used token (theft/replay) revokes the whole
+   * family and invalidates the user's sessions.
    */
-  async refreshTokens(
-    refreshToken: string,
-  ): Promise<{ token: string; refreshToken: string }> {
+  async refreshTokens(refreshToken: string): Promise<RefreshedTokens> {
     const invalid = () =>
       new UnauthorizedException('Invalid or expired refresh token');
 
@@ -234,71 +260,101 @@ export class AuthService {
         refreshToken,
         { secret: this.refreshTokenSecret },
       );
-      // Un refresh token senza jti/fid e' di prima della rotazione: non e' piu' valido.
+      // A refresh token without jti/fid predates rotation: it is no longer valid.
       if (!decoded.id || !decoded.jti || !decoded.fid) throw invalid();
 
-      const rotation = await this.refreshTokenService.rotate(decoded.jti);
-      if (rotation.status === 'reused') {
-        const usedAt = rotation.token.usedAt?.getTime() ?? 0;
-        if (Date.now() - usedAt >= this.reuseGraceMs) {
-          await this.refreshTokenService.revokeFamily(rotation.token.familyId);
-          await this.userService.incrementTokenVersion(rotation.token.userId);
-          this.logger.warn(
-            `Riuso di un refresh token rilevato (utente ${rotation.token.userId}): famiglia revocata e sessioni invalidate`,
-          );
-        }
-        throw invalid();
-      }
-      if (rotation.status !== 'rotated') throw invalid();
+      // Look up and register without awaiting in between: two concurrent requests with the same
+      // token cannot both start a rotation, the second one waits for the first one's result.
+      const inProgress = this.rotations.get(decoded.jti);
+      if (inProgress) return await inProgress;
 
-      const user = await this.userService.getUserById(decoded.id);
-      if (
-        !user ||
-        user.id !== rotation.token.userId ||
-        (decoded.tokenVersion ?? 0) !== user.tokenVersion
-      ) {
-        throw invalid();
-      }
-
-      const newAccessToken = await this.generateJwtToken(user);
-      const newRefreshToken = await this.generateRefreshToken(
-        user,
-        rotation.token.familyId,
-      );
-      return { token: newAccessToken, refreshToken: newRefreshToken };
+      const rotation = this.rotate(decoded.id, decoded.jti, decoded);
+      this.rotations.set(decoded.jti, rotation, {
+        familyId: decoded.fid,
+        userId: decoded.id,
+      });
+      // A failure is never cached: the next attempt is judged again.
+      rotation.catch(() => this.rotations.delete(decoded.jti as string));
+      return await rotation;
     } catch (error) {
       if (!(error instanceof UnauthorizedException)) {
         this.logger.error(
-          `Refresh fallito: ${error instanceof Error ? error.message : String(error)}`,
+          `Refresh failed: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
       throw invalid();
     }
   }
 
-  /** Revoca TUTTE le sessioni dell'utente: refresh token e access token gia' emessi. */
+  private async rotate(
+    userId: string,
+    jti: string,
+    decoded: TokenPayload,
+  ): Promise<RefreshedTokens> {
+    const invalid = () =>
+      new UnauthorizedException('Invalid or expired refresh token');
+
+    const rotation = await this.refreshTokenService.rotate(
+      jti,
+      this.reuseGraceSeconds,
+    );
+    if (rotation.status === 'reused') {
+      // Inside the grace period (by the database clock) it is a parallel request whose result is
+      // not in this process's memory: reject it, do not punish it. After it, it is a replay.
+      if (!rotation.withinGrace) {
+        const { familyId, userId: owner } = rotation.token;
+        this.rotations.invalidateFamily(familyId);
+        await this.refreshTokenService.revokeFamily(familyId);
+        await this.userService.incrementTokenVersion(owner);
+        this.logger.warn(
+          `Refresh token reuse detected (user ${owner}): family revoked and sessions invalidated`,
+        );
+      }
+      throw invalid();
+    }
+    if (rotation.status !== 'rotated') throw invalid();
+
+    const user = await this.userService.getUserById(userId);
+    if (
+      !user ||
+      user.id !== rotation.token.userId ||
+      (decoded.tokenVersion ?? 0) !== user.tokenVersion
+    ) {
+      throw invalid();
+    }
+
+    const familyId = rotation.token.familyId;
+    return {
+      token: await this.generateJwtToken(user, familyId),
+      refreshToken: await this.generateRefreshToken(user, familyId),
+    };
+  }
+
+  /** Revokes ALL the user's sessions: refresh tokens and already issued access tokens. */
   async revokeSessions(userId: string): Promise<void> {
+    this.rotations.invalidateUser(userId);
     await this.userService.incrementTokenVersion(userId);
     await this.refreshTokenService.revokeAllForUser(userId);
   }
 
   /**
-   * Logout: revoca la sessione del refresh token corrente (non solo i cookie).
-   * Un cookie assente o non valido non e' un errore: non c'e' nulla da revocare.
+   * Logout: revokes the session of the current refresh token (not just the cookies).
+   * A missing or invalid cookie is not an error: there is nothing to revoke.
    */
   async logout(refreshToken: string | undefined): Promise<void> {
     if (!refreshToken) return;
     try {
-      // Anche un token scaduto identifica la sessione da chiudere; la firma resta verificata.
+      // Even an expired token identifies the session to close; the signature is still verified.
       const decoded = await this.jwtService.verifyAsync<TokenPayload>(
         refreshToken,
         { secret: this.refreshTokenSecret, ignoreExpiration: true },
       );
       if (decoded.fid) {
+        this.rotations.invalidateFamily(decoded.fid);
         await this.refreshTokenService.revokeFamily(decoded.fid);
       }
     } catch {
-      // cookie non valido: nessuna sessione da revocare
+      // invalid cookie: no session to revoke
     }
   }
 
@@ -311,7 +367,7 @@ export class AuthService {
   clearAuthCookies(res: Response): void {
     res.clearCookie('access_token', { path: '/' });
     res.clearCookie('refresh_token', { path: REFRESH_COOKIE_PATH });
-    // Cookie emessi prima della restrizione di path (D7) vivono ancora su "/".
+    // Cookies issued before the path restriction (D7) still live on "/".
     res.clearCookie('refresh_token', { path: '/' });
   }
 
@@ -336,7 +392,7 @@ export class AuthService {
       },
       refreshTokenOptions: {
         ...base,
-        // Il browser lo invia solo alle rotte /api/auth (refresh, logout), non a ogni API.
+        // The browser only sends it to the /api/auth routes (refresh, logout), not to every API.
         path: REFRESH_COOKIE_PATH,
         maxAge: parseDurationMs(this.refreshTokenExpiration),
       },
@@ -344,14 +400,14 @@ export class AuthService {
   }
 
   /**
-   * Registrazione con risposta UNIFORME (202) per email nuova e gia' registrata: non rivela
-   * se un indirizzo ha un account. Per rendere uguali anche i tempi, l'hash bcrypt si calcola
-   * sempre. Chi possiede un indirizzo gia' registrato riceve un avviso via email; chi perde una
-   * corsa di registrazioni concorrenti (violazione di unicita') viene trattato allo stesso modo.
-   * Non si modifica MAI un account esistente (nemmeno la password).
+   * Registration with a UNIFORM response (202) for a new and an already registered email: it does not reveal
+   * whether an address has an account. To make the timings equal as well, the bcrypt hash is
+   * always computed. Whoever owns an already registered address gets a notice by email; whoever loses a
+   * race between concurrent registrations (uniqueness violation) is treated the same way.
+   * An existing account is NEVER modified (not even its password).
    */
   async register(dto: RegisterUserDTO): Promise<{ message: string }> {
-    // Se il permesso USER manca si risponde 503 PRIMA di qualsiasi altra cosa: nessun utente senza permessi.
+    // If the USER permission is missing, answer 503 BEFORE anything else: no user without permissions.
     const userRole = await this.permissionService.getRequired('USER');
     const hashedPassword = await this.hashPassword(dto.password);
 
@@ -378,10 +434,10 @@ export class AuthService {
   }
 
   /**
-   * Login con password. Contro l'enumerazione degli account: la password si confronta SEMPRE
-   * con bcrypt (con un hash fittizio se l'utente non esiste o non ha password) e "utente
-   * inesistente", "password errata" e "account solo Google" danno la stessa risposta.
-   * Blocco per account dopo troppi errori (vedi LoginAttemptService).
+   * Login with password. Against account enumeration: the password is ALWAYS compared
+   * with bcrypt (with a dummy hash if the user does not exist or has no password) and "non-existent
+   * user", "wrong password" and "Google-only account" give the same response.
+   * Per-account lock after too many failures (see LoginAttemptService).
    */
   async login(
     dto: UserAuthDTO,
@@ -390,7 +446,7 @@ export class AuthService {
   ): Promise<void> {
     const user = await this.userService.getUserByEmail(dto.email);
 
-    // Il tentativo si conta prima di controllare la password (atomico: vedi LoginAttemptService).
+    // The attempt is counted before checking the password (atomic: see LoginAttemptService).
     const { locked } = await this.loginAttemptService.registerAttempt(
       dto.email,
     );
@@ -402,7 +458,7 @@ export class AuthService {
         user.id,
         user.tokenVersion,
       );
-    // Il dispositivo gia' riconosciuto del proprietario non resta fuori per un blocco causato da altri.
+    // The owner's already recognized device is not shut out by a lock caused by others.
     if (locked && !knownDevice) {
       throw new HttpException(
         'Too many failed login attempts. Try again later.',
@@ -421,7 +477,7 @@ export class AuthService {
 
     await this.loginAttemptService.reset(dto.email);
 
-    // Dopo la password corretta: chi la conosce puo' sapere che l'email non e' verificata.
+    // After the correct password: whoever knows it may learn that the email is not verified.
     if (!user.emailVerifiedAt) {
       throw new ForbiddenException(
         'Email not verified. Check your inbox for the verification link.',
@@ -430,11 +486,7 @@ export class AuthService {
 
     await this.rehashPasswordIfOutdated(user, dto.password as string);
 
-    this.setAuthCookies(
-      res,
-      await this.generateJwtToken(user),
-      await this.generateRefreshToken(user),
-    );
+    await this.startSession(user, res);
     res.cookie(
       TRUSTED_DEVICE_COOKIE,
       createTrustedDeviceCookie(this.jwtSecret, user.id, user.tokenVersion),
@@ -451,10 +503,10 @@ export class AuthService {
   }
 
   /**
-   * Conferma l'email scegliendo la password. L'hash si calcola PRIMA di guardare il token, cosi'
-   * token valido e non valido costano lo stesso. Chi conferma e' il proprietario della casella:
-   * la sua password sostituisce quella inserita alla registrazione (che potrebbe essere di un
-   * altro: pre-hijacking).
+   * Confirms the email while choosing the password. The hash is computed BEFORE looking at the token, so
+   * a valid and an invalid token cost the same. Whoever confirms owns the mailbox:
+   * their password replaces the one entered at registration (which may belong to someone
+   * else: pre-hijacking).
    */
   async verifyEmail(token: string, password: string): Promise<void> {
     await this.accountService.verifyEmail(
@@ -464,11 +516,14 @@ export class AuthService {
   }
 
   /**
-   * Reimposta la password con il token ricevuto via email (monouso, con scadenza).
-   * Invalida TUTTE le sessioni (tokenVersion + refresh token), i dispositivi riconosciuti, i token
-   * pendenti e il blocco per tentativi falliti. Il token e' consumato in modo atomico.
+   * Resets the password with the token received by email (single-use, with an expiry).
+   * Invalidates ALL the sessions (tokenVersion + refresh tokens), the recognized devices, the pending
+   * tokens and the lock from failed attempts. The token is consumed atomically.
+   * The hash is computed BEFORE consuming the token: if it fails the link is not burned (and a valid
+   * and an invalid token cost the same).
    */
   async resetPassword(token: string, newPassword: string): Promise<void> {
+    const passwordHash = await this.hashPassword(newPassword);
     const userId = await this.authTokenService.consume(
       token,
       AuthTokenType.PASSWORD_RESET,
@@ -478,16 +533,14 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired token');
     }
 
-    await this.userService.resetPassword(
-      userId,
-      await this.hashPassword(newPassword),
-    );
+    this.rotations.invalidateUser(userId);
+    await this.userService.resetPassword(userId, passwordHash);
     await this.refreshTokenService.revokeAllForUser(userId);
     await this.authTokenService.invalidateAll(userId);
     await this.loginAttemptService.reset(user.email);
   }
 
-  /** Re-hash trasparente: hash creati con un costo piu' basso dell'attuale vengono rigenerati al login. */
+  /** Transparent re-hash: hashes created with a lower cost than the current one are regenerated at login. */
   private async rehashPasswordIfOutdated(
     user: User,
     plainPassword: string,
@@ -503,9 +556,9 @@ export class AuthService {
         password: await this.hashPassword(plainPassword),
       });
     } catch (error) {
-      // Un re-hash fallito non deve impedire l'accesso: si riprovera' al prossimo login.
+      // A failed re-hash must not prevent access: it will be retried at the next login.
       this.logger.warn(
-        `Re-hash della password non riuscito: ${error instanceof Error ? error.message : String(error)}`,
+        `Password re-hash failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -515,30 +568,35 @@ export class AuthService {
     res: Response,
   ): Promise<void> {
     const user = await this.resolveGoogleUser(googleUser);
+    await this.startSession(user, res);
+  }
 
+  /** New session: a new family, shared by the access and refresh token, in the cookies. */
+  private async startSession(user: User, res: Response): Promise<void> {
+    const familyId = randomUUID();
     this.setAuthCookies(
       res,
-      await this.generateJwtToken(user),
-      await this.generateRefreshToken(user),
+      await this.generateJwtToken(user, familyId),
+      await this.generateRefreshToken(user, familyId),
     );
   }
 
   /**
-   * Trova o crea l'utente per un profilo Google GIA' con email verificata da Google
-   * (lo garantisce la strategia). Regole contro il pre-hijacking:
-   * - account locale NON verificato: la password (che potrebbe essere dell'attaccante)
-   *   viene azzerata e le sessioni invalidate prima di collegare Google;
-   * - account locale verificato: Google viene collegato e la password resta valida.
+   * Finds or creates the user for a Google profile whose email Google has ALREADY verified
+   * (guaranteed by the strategy). Rules against pre-hijacking:
+   * - UNVERIFIED local account: the password (which may be the attacker's)
+   *   is wiped and the sessions are invalidated before linking Google;
+   * - verified local account: Google is linked and the password stays valid.
    */
   private async resolveGoogleUser(googleUser: {
     email: string;
     googleId: string;
   }): Promise<User> {
-    // L'identita' Google (sub) prevale sull'email: l'utente puo' cambiare email su Google.
+    // The Google identity (sub) takes precedence over the email: the user may change email on Google.
     let user = await this.userService.getUserByGoogleId(googleUser.googleId);
     if (!user) {
       user = await this.userService.getUserByEmail(googleUser.email);
-      // Stessa email ma un altro account Google: non si entra e non si sovrascrive nulla.
+      // Same email but another Google account: do not log in and overwrite nothing.
       if (user?.googleId && user.googleId !== googleUser.googleId) {
         throw new GoogleAuthException(
           'account_conflict',
@@ -559,7 +617,7 @@ export class AuthService {
         });
       } catch (error) {
         if (!(error instanceof ConflictException)) throw error;
-        // Due primi accessi contemporanei: l'altro ha vinto la corsa, si prosegue col suo utente.
+        // Two simultaneous first logins: the other one won the race, carry on with their user.
         user =
           (await this.userService.getUserByGoogleId(googleUser.googleId)) ??
           (await this.userService.getUserByEmail(googleUser.email));
@@ -582,7 +640,7 @@ export class AuthService {
         await this.authTokenService.invalidateAll(claimed.id);
         return claimed;
       }
-      // Verificato nel frattempo dal proprietario: si prosegue con il collegamento normale.
+      // Verified in the meantime by the owner: carry on with the normal linking.
       user = (await this.userService.getUserById(user.id)) ?? user;
     }
 

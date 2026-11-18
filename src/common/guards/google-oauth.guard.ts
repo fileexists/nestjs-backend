@@ -22,7 +22,7 @@ import { isGoogleConfigured } from '../../modules/auth/strategies/google.strateg
 
 type CanActivateResult = boolean | Promise<boolean> | Observable<boolean>;
 
-/** Senza GOOGLE_* il provider e' disattivato: 501 invece di una strategia con credenziali finte. */
+/** Without GOOGLE_* the provider is disabled: 501 instead of a strategy with fake credentials. */
 function assertGoogleConfigured(configService: ConfigService): void {
   if (!isGoogleConfigured(configService)) {
     throw new NotImplementedException(
@@ -32,9 +32,9 @@ function assertGoogleConfigured(configService: ConfigService): void {
 }
 
 /**
- * Avvio del flusso (GET /auth/google): genera il `state`, lo mette in un cookie
- * firmato e lo passa a Passport, che lo inoltra a Google.
- * Non si chiede `accessType: offline` ne `prompt: consent`: i token di Google non si usano.
+ * Start of the flow (GET /auth/google): generates the `state`, puts it in a signed
+ * cookie and hands it to Passport, which forwards it to Google.
+ * `accessType: offline` and `prompt: consent` are not requested: Google's tokens are not used.
  */
 @Injectable()
 export class GoogleOAuthGuard extends AuthGuard('google') {
@@ -48,7 +48,7 @@ export class GoogleOAuthGuard extends AuthGuard('google') {
     const request = http.getRequest<Request>();
     const response = http.getResponse<Response>();
 
-    // Origine di ritorno: solo tra quelle della whitelist FRONTEND_URL; si firma l'indice.
+    // Return origin: only among those in the FRONTEND_URL whitelist; the index is signed.
     const redirectIndex =
       request.query.redirect_to === undefined
         ? 0
@@ -77,9 +77,9 @@ export class GoogleOAuthGuard extends AuthGuard('google') {
 }
 
 /**
- * Callback (GET /auth/google/callback): PRIMA di parlare con Google verifica che il
- * `state` coincida con il cookie firmato del browser. Il cookie e' monouso: viene
- * cancellato sempre, anche se la verifica fallisce.
+ * Callback (GET /auth/google/callback): BEFORE talking to Google it checks that the
+ * `state` matches the browser's signed cookie. The cookie is single-use: it is
+ * always deleted, even if the check fails.
  */
 @Injectable()
 export class GoogleCallbackGuard extends AuthGuard('google') {

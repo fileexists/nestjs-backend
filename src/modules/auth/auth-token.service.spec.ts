@@ -37,7 +37,7 @@ describe('AuthTokenService', () => {
   });
 
   describe('issue', () => {
-    it('salva solo lo SHA-256 del token, mai il token in chiaro', async () => {
+    it('stores only the SHA-256 of the token, never the token in clear', async () => {
       const raw = await service.issue(
         'user-1',
         AuthTokenType.EMAIL_VERIFICATION,
@@ -54,7 +54,7 @@ describe('AuthTokenService', () => {
       expect(raw.length).toBeGreaterThanOrEqual(40);
     });
 
-    it('imposta la scadenza in base al TTL', async () => {
+    it('sets the expiry from the TTL', async () => {
       const before = Date.now();
       await service.issue('user-1', AuthTokenType.PASSWORD_RESET, 3_600_000);
       const { expiresAt } = (
@@ -66,7 +66,7 @@ describe('AuthTokenService', () => {
       expect(expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 3_600_000);
     });
 
-    it('invalida i token non usati dello stesso tipo prima di crearne uno nuovo', async () => {
+    it('invalidates the unused tokens of the same type before creating a new one', async () => {
       await service.issue('user-1', AuthTokenType.EMAIL_VERIFICATION, 60_000);
       expect(repository.delete).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -79,7 +79,7 @@ describe('AuthTokenService', () => {
       );
     });
 
-    it('genera token diversi a ogni chiamata', async () => {
+    it('generates different tokens on every call', async () => {
       const a = await service.issue(
         'user-1',
         AuthTokenType.EMAIL_VERIFICATION,
@@ -95,7 +95,7 @@ describe('AuthTokenService', () => {
   });
 
   describe('consume', () => {
-    it('ritorna lo userId e cerca per hash, tipo, non usato e non scaduto (UPDATE atomico)', async () => {
+    it('returns the userId and looks up by hash, type, unused and not expired (atomic UPDATE)', async () => {
       execute.mockResolvedValue({ raw: [{ userId: 'user-1' }] });
 
       const userId = await service.consume(
@@ -116,7 +116,7 @@ describe('AuthTokenService', () => {
       });
     });
 
-    it('ritorna null se nessuna riga corrisponde (sconosciuto, scaduto o gia usato)', async () => {
+    it('returns null if no row matches (unknown, expired or already used)', async () => {
       execute.mockResolvedValue({ raw: [] });
       await expect(
         service.consume('raw-token', AuthTokenType.EMAIL_VERIFICATION),
@@ -125,19 +125,19 @@ describe('AuthTokenService', () => {
   });
 
   describe('invalidateAll / deleteExpired / findLatestActive', () => {
-    it('invalidateAll cancella i token non usati dell utente', async () => {
+    it("invalidateAll deletes the user's unused tokens", async () => {
       await service.invalidateAll('user-1');
       expect(repository.delete).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'user-1' }),
       );
     });
 
-    it('deleteExpired ritorna il numero di righe rimosse', async () => {
+    it('deleteExpired returns the number of rows removed', async () => {
       repository.delete.mockResolvedValue({ affected: 3 });
       await expect(service.deleteExpired()).resolves.toBe(3);
     });
 
-    it('findLatestActive prende il piu recente non usato', async () => {
+    it('findLatestActive takes the most recent unused one', async () => {
       repository.findOne.mockResolvedValue(null);
       await service.findLatestActive(
         'user-1',

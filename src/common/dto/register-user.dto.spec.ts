@@ -110,24 +110,21 @@ describe('RegisterUserDTO', () => {
   });
 });
 
-describe('normalizzazione email nei DTO (B2)', () => {
+describe('email normalization in the DTOs (B2)', () => {
   it.each([
     ['UserAuthDTO', UserAuthDTO, { password: 'Pass1234!' }],
     ['RegisterUserDTO', RegisterUserDTO, { password: 'Pass1234!' }],
-  ])(
-    '%s: trim + minuscolo prima della validazione',
-    async (_name, Dto, extra) => {
-      const dto = plainToInstance(Dto, {
-        email: '  Mario.Rossi@Example.COM ',
-        ...extra,
-      });
+  ])('%s: trim + lowercase before validation', async (_name, Dto, extra) => {
+    const dto = plainToInstance(Dto, {
+      email: '  Mario.Rossi@Example.COM ',
+      ...extra,
+    });
 
-      expect(dto.email).toBe('mario.rossi@example.com');
-      expect(await validate(dto)).toHaveLength(0);
-    },
-  );
+    expect(dto.email).toBe('mario.rossi@example.com');
+    expect(await validate(dto)).toHaveLength(0);
+  });
 
-  it('un valore non stringa non viene toccato e fallisce la validazione come prima', async () => {
+  it('a non-string value is left alone and fails validation as before', async () => {
     const dto = plainToInstance(RegisterUserDTO, {
       email: 12345,
       password: 'Pass1234!',
@@ -139,7 +136,7 @@ describe('normalizzazione email nei DTO (B2)', () => {
     );
   });
 
-  it('spazi interni restano un errore (non vengono "aggiustati")', async () => {
+  it('inner spaces stay an error (they are not "fixed")', async () => {
     const dto = plainToInstance(RegisterUserDTO, {
       email: 'ma rio@example.com',
       password: 'Pass1234!',
@@ -151,13 +148,13 @@ describe('normalizzazione email nei DTO (B2)', () => {
   });
 });
 
-describe('password: limite di 72 byte (bcrypt)', () => {
-  // 25 caratteri da 3 byte = 75 byte: passerebbe MaxLength(72) ma bcrypt ne ignorerebbe 3.
+describe('password: 72-byte limit (bcrypt)', () => {
+  // 25 characters of 3 bytes = 75 bytes: it would pass MaxLength(72) but bcrypt would ignore 3 of them.
   const multibyte = '€'.repeat(25);
 
-  // Il login non lo applica: chi ha gia' una password multibyte lunga deve poter entrare
-  // (bcrypt la tronca allo stesso modo di quando fu creata).
-  it('registrazione: rifiuta una password oltre 72 byte anche se ha meno di 72 caratteri', async () => {
+  // Login does not apply it: someone who already has a long multibyte password must be able to get in
+  // (bcrypt truncates it the same way as when it was created).
+  it('registration: rejects a password over 72 bytes even if it has fewer than 72 characters', async () => {
     const dto = plainToInstance(RegisterUserDTO, {
       email: 'user@example.com',
       password: multibyte,
@@ -168,7 +165,7 @@ describe('password: limite di 72 byte (bcrypt)', () => {
     expect(errors.some((e) => e.property === 'password')).toBe(true);
   });
 
-  it('login: non cambia, accetta la stessa password', async () => {
+  it('login: unchanged, accepts the same password', async () => {
     const dto = plainToInstance(UserAuthDTO, {
       email: 'user@example.com',
       password: multibyte,
@@ -177,7 +174,7 @@ describe('password: limite di 72 byte (bcrypt)', () => {
     expect(await validate(dto)).toHaveLength(0);
   });
 
-  it('accetta 24 caratteri da 3 byte (72 byte esatti)', async () => {
+  it('accepts 24 three-byte characters (exactly 72 bytes)', async () => {
     const dto = plainToInstance(RegisterUserDTO, {
       email: 'user@example.com',
       password: '€'.repeat(24),

@@ -1,8 +1,8 @@
 import { ValidateBy, ValidationOptions } from 'class-validator';
 
 /**
- * Lunghezza massima in BYTE (UTF-8). bcrypt considera solo i primi 72 byte: con
- * caratteri multibyte `MaxLength(72)` non basta e la parte oltre il limite verrebbe ignorata.
+ * Maximum length in BYTES (UTF-8). bcrypt only considers the first 72 bytes: with
+ * multibyte characters `MaxLength(72)` is not enough and the part beyond the limit would be ignored.
  */
 export function MaxBytes(
   max: number,

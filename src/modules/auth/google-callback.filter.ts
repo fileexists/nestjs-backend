@@ -15,10 +15,10 @@ import { buildFrontendRedirect, frontendOrigins } from './frontend-redirect';
 import { GoogleAuthException } from './google-auth.exception';
 
 /**
- * Il callback di Google e' una navigazione del browser, non una chiamata API: un
- * errore non deve lasciare l'utente su una pagina JSON, ma riportarlo al frontend
- * con `?status=error&reason=...`. Restano risposte HTTP normali i casi che non sono
- * un esito di login (501 provider non configurato, 429, ...).
+ * The Google callback is a browser navigation, not an API call: an
+ * error must not leave the user on a JSON page, but take them back to the frontend
+ * with `?status=error&reason=...`. Cases that are not a login outcome
+ * (501 provider not configured, 429, ...) stay normal HTTP responses.
  */
 @Catch()
 @Injectable()
@@ -45,10 +45,10 @@ export class GoogleCallbackExceptionFilter implements ExceptionFilter {
     if (exception instanceof GoogleAuthException) {
       reason = exception.code;
     } else if (exception instanceof UnauthorizedException) {
-      reason = 'failed'; // es. consenso negato su Google, code non valido
+      reason = 'failed'; // e.g. consent denied on Google, invalid code
     } else {
       this.logger.error(
-        `Errore inatteso nel callback Google: ${exception instanceof Error ? exception.message : String(exception)}`,
+        `Unexpected error in the Google callback: ${exception instanceof Error ? exception.message : String(exception)}`,
       );
     }
 

@@ -1,12 +1,12 @@
 /**
- * D4 - Registrazione concorrente della stessa email (PostgreSQL vero).
- * Prima: la violazione di unicita (23505) diventava un 500.
+ * D4 - Concurrent registration of the same email (real PostgreSQL).
+ * Before: the uniqueness violation (23505) became a 500.
  */
 import { createHarness, Harness } from './support/harness';
 import { cookieNames, register, sql } from './support/api';
 import { googleLogin } from './support/google';
 
-describe('D4 - registrazioni concorrenti (e2e, PostgreSQL vero)', () => {
+describe('D4 - concurrent registrations (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -22,17 +22,17 @@ describe('D4 - registrazioni concorrenti (e2e, PostgreSQL vero)', () => {
   const userCount = async () =>
     (await sql<{ n: number }>(h, 'SELECT count(*)::int AS n FROM users'))[0].n;
 
-  it('la stessa email inviata 10 volte insieme: nessun 500, un solo utente', async () => {
+  it('the same email sent 10 times at once: no 500, a single user', async () => {
     const results = await Promise.all(
       Array.from({ length: 10 }, () => register(h, 'race@example.com')),
     );
 
     expect(results.map((r) => r.status).filter((s) => s >= 500)).toEqual([]);
-    expect(new Set(results.map((r) => r.status))).toEqual(new Set([202])); // risposta uniforme
+    expect(new Set(results.map((r) => r.status))).toEqual(new Set([202])); // uniform response
     expect(await userCount()).toBe(1);
   });
 
-  it('stessa email in forme diverse (maiuscole/spazi) in parallelo: un solo utente', async () => {
+  it('same email in different forms (case/spaces) in parallel: a single user', async () => {
     const variants = [
       'race@example.com',
       'RACE@example.com',
@@ -47,19 +47,19 @@ describe('D4 - registrazioni concorrenti (e2e, PostgreSQL vero)', () => {
     expect(await userCount()).toBe(1);
   });
 
-  it("chi perde la corsa riceve l'avviso 'indirizzo gia registrato', chi vince la verifica", async () => {
+  it("whoever loses the race gets the 'address already registered' notice, whoever wins gets the verification", async () => {
     await Promise.all(
       Array.from({ length: 6 }, () => register(h, 'race@example.com')),
     );
 
     expect(h.mail.to('race@example.com', 'verification')).toHaveLength(1);
-    // al massimo un avviso (periodo di attesa), mai un secondo token
+    // at most one notice (waiting period), never a second token
     expect(
       h.mail.to('race@example.com', 'registration-notice').length,
     ).toBeLessThanOrEqual(5);
   });
 
-  it('due primi accessi Google contemporanei dello stesso utente: nessun 500, un solo utente', async () => {
+  it('two simultaneous first Google logins of the same user: no 500, a single user', async () => {
     const profile = {
       sub: 'g-race',
       email: 'g-race@example.com',

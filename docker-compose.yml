@@ -17,8 +17,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # Mailpit: SMTP di sviluppo (le email non escono mai dalla macchina).
-  #   SMTP  -> localhost:1025  (dentro la rete compose: mailpit:1025)
+  # Mailpit: development SMTP (emails never leave the machine).
+  #   SMTP  -> localhost:1025  (inside the compose network: mailpit:1025)
   #   UI    -> http://localhost:8025
   mailpit:
     image: axllent/mailpit:v1.21
@@ -28,8 +28,8 @@ services:
       - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
       - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
 
-  # Database usa-e-getta per gli e2e su PostgreSQL vero (profilo "test").
-  # Porta 5433 per non confliggere con il postgres di sviluppo; dati in tmpfs.
+  # Throwaway database for the e2e tests on a real PostgreSQL (profile "test").
+  # Port 5433 so it does not clash with the development postgres; data in tmpfs.
   #   docker compose --profile test up -d postgres-test
   postgres-test:
     profiles: ["test"]

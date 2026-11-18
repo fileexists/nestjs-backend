@@ -1,11 +1,11 @@
 import { isUniqueViolation } from './db-errors';
 
 describe('isUniqueViolation (D4)', () => {
-  it("riconosce il codice 23505 sull'errore (TypeORM QueryFailedError)", () => {
+  it('recognizes code 23505 on the error (TypeORM QueryFailedError)', () => {
     expect(isUniqueViolation({ code: '23505' })).toBe(true);
   });
 
-  it('riconosce il codice nel driverError', () => {
+  it('recognizes the code in driverError', () => {
     expect(isUniqueViolation({ driverError: { code: '23505' } })).toBe(true);
   });
 
@@ -17,7 +17,7 @@ describe('isUniqueViolation (D4)', () => {
     undefined,
     'error',
     new Error('x'),
-  ])('ignora %j', (error) => {
+  ])('ignores %j', (error) => {
     expect(isUniqueViolation(error)).toBe(false);
   });
 });

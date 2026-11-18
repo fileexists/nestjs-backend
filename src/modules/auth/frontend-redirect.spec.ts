@@ -7,13 +7,13 @@ import {
 const ORIGINS = ['https://app.example.com', 'https://admin.example.com:8443'];
 
 describe('buildFrontendRedirect (C1)', () => {
-  it('costruisce l URL di successo dalla prima origine con percorso fisso', () => {
+  it('builds the success URL from the first origin with a fixed path', () => {
     expect(buildFrontendRedirect(ORIGINS, 0, { status: 'success' })).toBe(
       'https://app.example.com/auth/callback?status=success',
     );
   });
 
-  it('usa l origine all indice scelto e aggiunge il motivo in caso di errore', () => {
+  it('uses the origin at the chosen index and adds the reason on error', () => {
     expect(
       buildFrontendRedirect(ORIGINS, 1, {
         status: 'error',
@@ -24,7 +24,7 @@ describe('buildFrontendRedirect (C1)', () => {
     );
   });
 
-  it('un indice fuori range ricade sull origine predefinita (mai su valori esterni)', () => {
+  it('an out-of-range index falls back to the default origin (never to outside values)', () => {
     expect(buildFrontendRedirect(ORIGINS, 99, { status: 'success' })).toMatch(
       /^https:\/\/app\.example\.com\//,
     );
@@ -33,7 +33,7 @@ describe('buildFrontendRedirect (C1)', () => {
     );
   });
 
-  it('il motivo viene codificato nell URL', () => {
+  it('the reason is encoded in the URL', () => {
     const url = buildFrontendRedirect(ORIGINS, 0, {
       status: 'error',
       reason: 'a&b=c',
@@ -43,13 +43,13 @@ describe('buildFrontendRedirect (C1)', () => {
   });
 });
 
-describe('resolveRedirectIndex (C1: nessun open redirect)', () => {
+describe('resolveRedirectIndex (C1: no open redirect)', () => {
   it.each([
     ['https://app.example.com', 0],
     ['https://app.example.com/', 0],
     ['https://app.example.com/qualsiasi/percorso?x=1', 0],
     ['https://admin.example.com:8443', 1],
-  ])('%s -> indice %i', (value, index) => {
+  ])('%s -> index %i', (value, index) => {
     expect(resolveRedirectIndex(ORIGINS, value)).toBe(index);
   });
 
@@ -65,14 +65,14 @@ describe('resolveRedirectIndex (C1: nessun open redirect)', () => {
     'data:text/html,x',
     '',
     'app.example.com',
-  ])('rifiuta %j', (value) => {
+  ])('rejects %j', (value) => {
     expect(() => resolveRedirectIndex(ORIGINS, value)).toThrow(
       BadRequestException,
     );
   });
 
   it.each([undefined, null, 42, {}, ['https://app.example.com']])(
-    'rifiuta il valore non stringa %j',
+    'rejects the non-string value %j',
     (value) => {
       expect(() => resolveRedirectIndex(ORIGINS, value)).toThrow(
         BadRequestException,

@@ -1,9 +1,9 @@
 /**
- * Integrazione con un SMTP VERO (Mailpit): il MailService reale spedisce l'email
- * di verifica e il token estratto dal messaggio conferma davvero l'account.
+ * Integration with a REAL SMTP (Mailpit): the real MailService sends the verification
+ * email and the token extracted from the message really confirms the account.
  *
- * Si esegue solo se E2E_MAILPIT_API e' impostata (in CI: service container mailpit;
- * in locale: `docker compose up -d mailpit` e
+ * It only runs if E2E_MAILPIT_API is set (in CI: mailpit service container;
+ * locally: `docker compose up -d mailpit` and
  * E2E_MAILPIT_API=http://localhost:8025 yarn test:e2e:db).
  */
 import { createHarness, Harness } from './support/harness';
@@ -22,7 +22,7 @@ async function mailpit<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${MAILPIT_API}${path}`, init);
   if (!res.ok) throw new Error(`Mailpit ${path} -> ${res.status}`);
   const text = await res.text();
-  // DELETE risponde "ok" in testo semplice, le GET rispondono JSON.
+  // DELETE answers "ok" as plain text, the GETs answer JSON.
   try {
     return JSON.parse(text) as T;
   } catch {
@@ -39,10 +39,10 @@ async function waitForMessage(to: string): Promise<MailpitSummary> {
     if (found) return found;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`Nessuna email arrivata a ${to}`);
+  throw new Error(`No email arrived for ${to}`);
 }
 
-suite('SMTP reale (Mailpit)', () => {
+suite('real SMTP (Mailpit)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -56,12 +56,12 @@ suite('SMTP reale (Mailpit)', () => {
     await mailpit('/api/v1/messages', { method: 'DELETE' });
   });
 
-  it("la registrazione spedisce un'email vera il cui link conferma l'account", async () => {
+  it('registration sends a real email whose link confirms the account', async () => {
     const email = 'smtp-user@example.com';
     expect((await register(h, email)).status).toBeLessThan(300);
 
     const summary = await waitForMessage(email);
-    expect(summary.Subject).toMatch(/conferma/i);
+    expect(summary.Subject).toMatch(/confirm/i);
     const message = await mailpit<{ Text: string; HTML: string }>(
       `/api/v1/message/${summary.ID}`,
     );

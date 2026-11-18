@@ -1,5 +1,5 @@
 /**
- * A1 - Verifica dell'email: registrazione, conferma, login, reinvio (PostgreSQL vero).
+ * A1 - Email verification: registration, confirmation, login, resend (real PostgreSQL).
  */
 import { createHash } from 'crypto';
 import { createHarness, Harness } from './support/harness';
@@ -16,7 +16,7 @@ import {
 
 const EMAIL = 'mario@example.com';
 
-describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
+describe('A1 - email verification (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -29,8 +29,8 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
     await h.reset();
   });
 
-  describe('registrazione', () => {
-    it('crea un account NON verificato e invia una sola email di verifica', async () => {
+  describe('registration', () => {
+    it('creates an UNVERIFIED account and sends a single verification email', async () => {
       const res = await register(h, EMAIL);
       expect(res.status).toBeLessThan(300);
 
@@ -40,7 +40,7 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
       expect(h.mail.to(EMAIL, 'verification')).toHaveLength(1);
     });
 
-    it('nel database c e solo lo SHA-256 del token, mai il token', async () => {
+    it('the database holds only the SHA-256 of the token, never the token', async () => {
       await register(h, EMAIL);
       const token = h.mail.lastToken(EMAIL, 'verification');
 
@@ -56,23 +56,23 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  describe('login prima e dopo la verifica', () => {
+  describe('login before and after verification', () => {
     beforeEach(async () => {
       await register(h, EMAIL);
     });
 
-    it('password corretta ma email non verificata -> 403 e nessun cookie', async () => {
+    it('correct password but unverified email -> 403 and no cookie', async () => {
       const res = await login(h, EMAIL);
       expect(res.status).toBe(403);
       expect(cookieNames(res)).toEqual([]);
     });
 
-    it('password sbagliata con email non verificata -> 401 (non 403)', async () => {
+    it('wrong password with an unverified email -> 401 (not 403)', async () => {
       const res = await login(h, EMAIL, 'Wrong-Passw0rd!');
       expect(res.status).toBe(401);
     });
 
-    it('dopo la conferma il login funziona e imposta i cookie', async () => {
+    it('after confirmation the login works and sets the cookies', async () => {
       const verified = await verifyEmail(
         h,
         h.mail.lastToken(EMAIL, 'verification'),
@@ -88,18 +88,18 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  describe('token di verifica', () => {
+  describe('verification token', () => {
     beforeEach(async () => {
       await register(h, EMAIL);
     });
 
-    it('e monouso: il secondo utilizzo fallisce con 400', async () => {
+    it('is single-use: the second use fails with 400', async () => {
       const token = h.mail.lastToken(EMAIL, 'verification');
       expect((await verifyEmail(h, token)).status).toBe(200);
       expect((await verifyEmail(h, token)).status).toBe(400);
     });
 
-    it('scaduto -> 400 e l account resta non verificato', async () => {
+    it('expired -> 400 and the account stays unverified', async () => {
       await h.db.query(
         `UPDATE auth_tokens SET "expiresAt" = now() - interval '1 minute'`,
       );
@@ -108,7 +108,7 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
       expect((await userRow(h, EMAIL))?.emailVerifiedAt).toBeNull();
     });
 
-    it('sconosciuto -> 400; troppo corto o assente -> 400 di validazione', async () => {
+    it('unknown -> 400; too short or missing -> 400 from validation', async () => {
       expect((await verifyEmail(h, 'x'.repeat(43))).status).toBe(400);
       expect((await verifyEmail(h, 'short')).status).toBe(400);
       expect(
@@ -116,7 +116,7 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
       ).toBe(400);
     });
 
-    it('due conferme concorrenti con lo stesso token: ne riesce una sola', async () => {
+    it('two concurrent confirmations with the same token: only one succeeds', async () => {
       const token = h.mail.lastToken(EMAIL, 'verification');
       const results = await Promise.all([
         verifyEmail(h, token),
@@ -127,10 +127,10 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  describe('reinvio', () => {
+  describe('resend', () => {
     const body = (res: { body: unknown }) => JSON.stringify(res.body);
 
-    it('per un account non verificato invia un token nuovo e invalida il vecchio (oltre il periodo di attesa)', async () => {
+    it('for an unverified account sends a new token and invalidates the old one (after the wait period)', async () => {
       await register(h, EMAIL);
       const oldToken = h.mail.lastToken(EMAIL, 'verification');
       await h.db.query(
@@ -150,7 +150,7 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
       expect((await verifyEmail(h, newToken)).status).toBe(200);
     });
 
-    it('entro il periodo di attesa non invia una seconda email', async () => {
+    it('within the wait period it does not send a second email', async () => {
       await register(h, EMAIL);
       const res = await http(h)
         .post('/api/auth/resend-verification')
@@ -160,7 +160,7 @@ describe('A1 - verifica email (e2e, PostgreSQL vero)', () => {
       expect(h.mail.to(EMAIL, 'verification')).toHaveLength(1);
     });
 
-    it('risposta identica (e nessuna email) per indirizzo inesistente e per account gia verificato', async () => {
+    it('identical response (and no email) for a nonexistent address and for an already verified account', async () => {
       await register(h, EMAIL);
       await verifyEmail(h, h.mail.lastToken(EMAIL, 'verification'));
       h.mail.clear();

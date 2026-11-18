@@ -10,7 +10,7 @@ export interface CleanupResult {
   loginAttempts: number;
 }
 
-/** Pulizia periodica dei token scaduti (refresh token e token monouso). */
+/** Periodic cleanup of expired tokens (refresh tokens and single-use tokens). */
 @Injectable()
 export class AuthCleanupService {
   private readonly logger = new Logger(AuthCleanupService.name);
@@ -21,13 +21,18 @@ export class AuthCleanupService {
     private readonly loginAttemptService: LoginAttemptService,
   ) {}
 
-  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  /**
+   * Every hour (not once a day): the login attempt counters are written for ANY email, existing or
+   * not, so they must not pile up for a whole day. Every instance runs it; the DELETEs are
+   * idempotent, so running it more than once at the same time is harmless.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
   async handleCron(): Promise<void> {
     try {
       await this.run();
     } catch (error) {
       this.logger.error(
-        `Pulizia token fallita: ${error instanceof Error ? error.message : String(error)}`,
+        `Token cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -38,9 +43,13 @@ export class AuthCleanupService {
       authTokens: await this.authTokenService.deleteExpired(),
       loginAttempts: await this.loginAttemptService.deleteStale(),
     };
-    this.logger.log(
-      `Pulizia: ${result.refreshTokens} refresh token, ${result.authTokens} token monouso e ${result.loginAttempts} contatori di login scaduti rimossi`,
-    );
+    const message = `Cleanup: ${result.refreshTokens} refresh tokens, ${result.authTokens} one-time tokens and ${result.loginAttempts} expired login counters removed`;
+    // Hourly: only say something when there was something to remove.
+    if (result.refreshTokens + result.authTokens + result.loginAttempts > 0) {
+      this.logger.log(message);
+    } else {
+      this.logger.debug(message);
+    }
     return result;
   }
 }

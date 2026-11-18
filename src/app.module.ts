@@ -18,7 +18,7 @@ import { AppController } from './app.controller';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      // I test non devono dipendere dal .env di sviluppo (DB e segreti veri).
+      // Tests must not depend on the development .env (real DB and secrets).
       ignoreEnvFile: process.env.NODE_ENV === 'test',
       validationSchema: envValidationSchema,
       validationOptions: {
@@ -36,7 +36,7 @@ import { AppController } from './app.controller';
           join(__dirname, '..', 'database', 'migrations', '*.{js,ts}'),
         ],
         migrationsRun: configService.get<boolean>('DB_MIGRATIONS_RUN') ?? false,
-        // Lo schema si evolve SOLO con le migrazioni (database/migrations/).
+        // The schema evolves ONLY through migrations (database/migrations/).
         synchronize: false,
         logging: configService.get<string>('NODE_ENV') === 'development',
       }),
@@ -54,9 +54,12 @@ import { AppController } from './app.controller';
     AuthGuard,
     PermissionsGuard,
     ThrottlerGuard,
+    // Order matters: global guards run in the order they are registered here. The rate limit goes
+    // FIRST so that requests the other guards reject (no/invalid token: 401, no permission: 403)
+    // still count; with it last, anonymous traffic on protected routes was never limited.
+    { provide: APP_GUARD, useExisting: ThrottlerGuard },
     { provide: APP_GUARD, useExisting: AuthGuard },
     { provide: APP_GUARD, useExisting: PermissionsGuard },
-    { provide: APP_GUARD, useExisting: ThrottlerGuard },
   ],
 })
 export class AppModule {}

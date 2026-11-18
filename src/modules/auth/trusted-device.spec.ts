@@ -6,23 +6,23 @@ import {
 
 const SECRET = 'test-secret-with-enough-length-0123456789';
 
-describe('trusted-device (D2: il proprietario non resta fuori)', () => {
-  it("un cookie appena creato vale per quell'utente e quella tokenVersion", () => {
+describe('trusted-device (D2: the owner is not locked out)', () => {
+  it('a freshly created cookie is valid for that user and that tokenVersion', () => {
     const cookie = createTrustedDeviceCookie(SECRET, 'user-1', 3);
     expect(verifyTrustedDevice(SECRET, cookie, 'user-1', 3)).toBe(true);
   });
 
   it.each([
     [
-      'altro utente',
+      'another user',
       (c: string) => verifyTrustedDevice(SECRET, c, 'user-2', 3),
     ],
     [
-      'tokenVersion diverso (logout-all / reset password)',
+      'different tokenVersion (logout-all / password reset)',
       (c: string) => verifyTrustedDevice(SECRET, c, 'user-1', 4),
     ],
     [
-      'altro segreto',
+      'another secret',
       (c: string) =>
         verifyTrustedDevice(
           'another-secret-0123456789abcdefghij',
@@ -32,7 +32,7 @@ describe('trusted-device (D2: il proprietario non resta fuori)', () => {
         ),
     ],
     [
-      'scaduto',
+      'expired',
       (c: string) =>
         verifyTrustedDevice(
           SECRET,
@@ -47,13 +47,13 @@ describe('trusted-device (D2: il proprietario non resta fuori)', () => {
   });
 
   it.each([undefined, null, 42, {}, '', 'a.b.c', 'a.b.c.d.e'])(
-    'rifiuta il valore malformato %j',
+    'rejects the malformed value %j',
     (value) => {
       expect(verifyTrustedDevice(SECRET, value, 'user-1', 3)).toBe(false);
     },
   );
 
-  it('rifiuta un cookie con firma alterata o con scadenza/utente modificati', () => {
+  it('rejects a cookie with a tampered signature or with a modified expiry/user', () => {
     const [user, version, expires, signature] = createTrustedDeviceCookie(
       SECRET,
       'user-1',
@@ -85,7 +85,7 @@ describe('trusted-device (D2: il proprietario non resta fuori)', () => {
     ).toBe(false);
   });
 
-  it('il cookie e httpOnly, SameSite=Lax, limitato a /api/auth e secure in produzione', () => {
+  it('the cookie is httpOnly, SameSite=Lax, limited to /api/auth and secure in production', () => {
     expect(trustedDeviceCookieOptions(false)).toMatchObject({
       httpOnly: true,
       sameSite: 'lax',

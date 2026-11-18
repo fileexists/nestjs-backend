@@ -1,13 +1,13 @@
 /**
- * D5 - Il permesso USER esiste sempre: seed idempotente all'avvio e, se manca,
- * la registrazione fallisce invece di creare utenti senza permessi. (PostgreSQL vero)
+ * D5 - The USER permission always exists: idempotent seed at startup and, if it is missing,
+ * registration fails instead of creating users without permissions. (real PostgreSQL)
  */
 import { PermissionService } from '../../src/modules/permission/permission.service';
 import { createHarness, Harness } from './support/harness';
 import { createVerifiedUser, http, register, sql } from './support/api';
 import { googleLogin } from './support/google';
 
-describe('D5 - permesso USER (e2e, PostgreSQL vero)', () => {
+describe('D5 - USER permission (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -29,19 +29,19 @@ describe('D5 - permesso USER (e2e, PostgreSQL vero)', () => {
   const userCount = async () =>
     (await sql<{ n: number }>(h, 'SELECT count(*)::int AS n FROM users'))[0].n;
 
-  it("all'avvio dell'app su un database vuoto il permesso USER viene creato", async () => {
-    // beforeAll ha avviato l'app su schema nuovo, senza nessun seed manuale
+  it('when the app starts on an empty database the USER permission is created', async () => {
+    // beforeAll started the app on a fresh schema, with no manual seed
     expect(await userPermission()).toHaveLength(1);
   });
 
-  it('il seed e idempotente: ripeterlo non duplica ne modifica il permesso', async () => {
+  it('the seed is idempotent: repeating it neither duplicates nor changes the permission', async () => {
     const before = await userPermission();
     await h.app.get(PermissionService).ensureDefaults();
     await h.app.get(PermissionService).ensureDefaults();
     expect(await userPermission()).toEqual(before);
   });
 
-  it('il seed e sicuro con piu istanze che partono insieme (nessun errore, una sola riga)', async () => {
+  it('the seed is safe with several instances starting together (no error, a single row)', async () => {
     await h.db.query(`DELETE FROM permissions WHERE name = 'USER'`);
     const service = h.app.get(PermissionService);
 
@@ -52,19 +52,19 @@ describe('D5 - permesso USER (e2e, PostgreSQL vero)', () => {
     expect(await userPermission()).toHaveLength(1);
   });
 
-  it('non sovrascrive una descrizione modificata da un amministratore', async () => {
+  it('does not overwrite a description changed by an administrator', async () => {
     await h.db.query(
-      `UPDATE permissions SET description = 'Descrizione personalizzata' WHERE name = 'USER'`,
+      `UPDATE permissions SET description = 'Custom description' WHERE name = 'USER'`,
     );
     await h.app.get(PermissionService).ensureDefaults();
     const [row] = await sql<{ description: string }>(
       h,
       `SELECT description FROM permissions WHERE name = 'USER'`,
     );
-    expect(row.description).toBe('Descrizione personalizzata');
+    expect(row.description).toBe('Custom description');
   });
 
-  it('gli utenti registrati ricevono il permesso USER', async () => {
+  it('registered users receive the USER permission', async () => {
     await createVerifiedUser(h, 'mario@example.com');
     const rows = await sql<{ name: string }>(
       h,
@@ -75,12 +75,12 @@ describe('D5 - permesso USER (e2e, PostgreSQL vero)', () => {
     expect(rows).toEqual([{ name: 'USER' }]);
   });
 
-  describe('permesso mancante a runtime', () => {
+  describe('permission missing at runtime', () => {
     beforeEach(async () => {
       await h.db.query(`DELETE FROM permissions WHERE name = 'USER'`);
     });
 
-    it('la registrazione NON crea un utente senza permessi: risponde 503 e non invia email', async () => {
+    it('registration does NOT create a user without permissions: answers 503 and sends no email', async () => {
       const res = await register(h, 'mario@example.com');
 
       expect(res.status).toBe(503);
@@ -88,7 +88,7 @@ describe('D5 - permesso USER (e2e, PostgreSQL vero)', () => {
       expect(h.mail.sent).toHaveLength(0);
     });
 
-    it('il primo accesso Google non crea utenti senza permessi', async () => {
+    it('the first Google login does not create users without permissions', async () => {
       const { callback } = await googleLogin(h.app, h.google, {
         sub: 'g1',
         email: 'g@example.com',
@@ -98,14 +98,14 @@ describe('D5 - permesso USER (e2e, PostgreSQL vero)', () => {
       expect(await userCount()).toBe(0);
     });
 
-    it('dopo il ripristino (riavvio/seed) la registrazione torna a funzionare', async () => {
+    it('after the restore (restart/seed) registration works again', async () => {
       expect((await register(h, 'a@example.com')).status).toBe(503);
       await h.app.get(PermissionService).ensureDefaults();
       expect((await register(h, 'a@example.com')).status).toBe(202);
       expect(await userCount()).toBe(1);
     });
 
-    it("il resto dell'app non e interessato (health, login di utenti esistenti)", async () => {
+    it('the rest of the app is not affected (health, login of existing users)', async () => {
       expect((await http(h).get('/health')).status).toBe(200);
     });
   });

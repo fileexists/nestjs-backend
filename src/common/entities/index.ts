@@ -6,7 +6,7 @@ import { User } from './user.entity';
 
 export { AuthToken, LoginAttempt, Permission, RefreshToken, User };
 
-/** Elenco unico delle entità: usato da AppModule e dalla CLI delle migrazioni. */
+/** Single list of the entities: used by AppModule and by the migrations CLI. */
 export const ENTITIES = [
   User,
   Permission,

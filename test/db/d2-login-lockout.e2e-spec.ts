@@ -1,6 +1,6 @@
 /**
- * D2 - Blocco per account dopo tentativi falliti (PostgreSQL vero), oltre al limite per IP.
- * Blocco temporaneo e progressivo, senza poter bloccare un account altrui all'infinito.
+ * D2 - Per-account lock after failed attempts (real PostgreSQL), on top of the per-IP limit.
+ * Temporary, progressive lock, without being able to lock someone else's account forever.
  */
 import { createHarness, Harness } from './support/harness';
 import {
@@ -23,7 +23,7 @@ interface AttemptRow {
   lockedUntil: Date | null;
 }
 
-describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
+describe('D2 - per-account lock (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -44,7 +44,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
   const secondsLeft = (row: AttemptRow) =>
     (new Date(row.lockedUntil!).getTime() - Date.now()) / 1000;
 
-  it('i primi 4 tentativi falliti non bloccano; il 5 si (anche con la password giusta)', async () => {
+  it('the first 4 failed attempts do not lock; the 5th does (even with the right password)', async () => {
     await failN(4);
     expect((await login(h, EMAIL)).status).toBe(200);
 
@@ -54,7 +54,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     expect(cookieNames(locked)).toEqual([]);
   });
 
-  it("il blocco e uguale per un'email inesistente: non rivela se l'account esiste", async () => {
+  it('the lock is the same for a nonexistent email: it does not reveal whether the account exists', async () => {
     await failN(5, 'ghost@example.com');
     const res = await login(h, 'ghost@example.com', WRONG);
     expect(res.status).toBe(429);
@@ -67,7 +67,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     );
   });
 
-  it('il primo blocco dura circa 1 minuto e i tentativi durante il blocco NON lo prolungano', async () => {
+  it('the first lock lasts about 1 minute and attempts during the lock do NOT extend it', async () => {
     await failN(5);
     const [first] = await attempts();
     expect(secondsLeft(first)).toBeGreaterThan(50);
@@ -82,7 +82,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     expect(after.lockLevel).toBe(1);
   });
 
-  it('e progressivo: ogni blocco successivo raddoppia, fino a un massimo', async () => {
+  it('it is progressive: each following lock doubles, up to a maximum', async () => {
     const expire = () =>
       h.db.query(
         `UPDATE login_attempts SET "lockedUntil" = now() - interval '1 second'`,
@@ -98,7 +98,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     }
   });
 
-  it('dopo la scadenza servono di nuovo 5 errori per un nuovo blocco (non basta 1)', async () => {
+  it('after the expiry 5 errors are needed again for a new lock (1 is not enough)', async () => {
     await failN(5);
     await h.db.query(
       `UPDATE login_attempts SET "lockedUntil" = now() - interval '1 second'`,
@@ -109,7 +109,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     expect((await login(h, EMAIL, WRONG)).status).toBe(429);
   });
 
-  it('un login riuscito azzera il contatore', async () => {
+  it('a successful login resets the counter', async () => {
     await failN(4);
     expect((await login(h, EMAIL)).status).toBe(200);
     expect(await attempts()).toHaveLength(0);
@@ -118,7 +118,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     expect((await login(h, EMAIL)).status).toBe(200);
   });
 
-  it('i fallimenti vecchi escono dalla finestra: il contatore riparte da zero', async () => {
+  it('old failures leave the window: the counter starts again from zero', async () => {
     await failN(4);
     await h.db.query(
       `UPDATE login_attempts SET "lastFailedAt" = now() - interval '2 hours'`,
@@ -130,35 +130,35 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     expect(row.lockedUntil).toBeNull();
   });
 
-  it('gli account sono indipendenti', async () => {
+  it('accounts are independent', async () => {
     await createVerifiedUser(h, 'other@example.com');
     await failN(5);
     expect((await login(h, EMAIL)).status).toBe(429);
     expect((await login(h, 'other@example.com')).status).toBe(200);
   });
 
-  it('email in maiuscolo o con spazi contano come lo stesso account', async () => {
+  it('uppercase emails or ones with spaces count as the same account', async () => {
     await failN(3);
     await login(h, ' MARIO@Example.COM ', WRONG);
     await login(h, 'Mario@example.com', WRONG);
     expect((await login(h, EMAIL)).status).toBe(429);
   });
 
-  it("nel database c'e' solo l'hash dell'identificatore, non l'email", async () => {
+  it('the database holds only the hash of the identifier, not the email', async () => {
     await failN(1);
     const [row] = await attempts();
     expect(row.identifier).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(row)).not.toContain('mario');
   });
 
-  describe("chi attacca non puo tenere fuori il proprietario all'infinito", () => {
-    it('il proprietario con un dispositivo gia riconosciuto entra anche durante il blocco; chi non ha il cookie no', async () => {
+  describe('an attacker cannot keep the owner out indefinitely', () => {
+    it('the owner with an already recognized device gets in even during the lock; whoever has no cookie does not', async () => {
       const owner = await login(h, EMAIL);
       const trusted = cookieValue(owner, 'trusted_device');
       expect(trusted).toBeDefined();
 
-      await failN(5); // l'attaccante blocca l'account
-      expect((await login(h, EMAIL)).status).toBe(429); // anche con la password giusta, ma senza cookie
+      await failN(5); // the attacker locks the account
+      expect((await login(h, EMAIL)).status).toBe(429); // even with the right password, but without the cookie
 
       const ownerAgain = await http(h)
         .post('/api/auth/login')
@@ -167,7 +167,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
       expect(ownerAgain.status).toBe(200);
     });
 
-    it("il cookie e legato all'account: non sblocca un altro account", async () => {
+    it('the cookie is bound to the account: it does not unlock another account', async () => {
       await createVerifiedUser(h, 'other@example.com');
       const trusted = cookieValue(
         await login(h, 'other@example.com'),
@@ -182,13 +182,15 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
       expect(res.status).toBe(429);
     });
 
-    it('un cookie forgiato o alterato non sblocca nulla', async () => {
+    it('a forged or tampered cookie unlocks nothing', async () => {
       const trusted = cookieValue(await login(h, EMAIL), 'trusted_device')!;
       await failN(5);
 
       for (const forged of [
         `${trusted}x`,
-        trusted.replace(/.$/, 'A'),
+        // Always a different last character: replacing it with a fixed one leaves the cookie
+        // untouched (and valid) whenever the signature already ends with it.
+        trusted.slice(0, -1) + (trusted.endsWith('A') ? 'B' : 'A'),
         'garbage',
         `${trusted.split('.')[0]}.9999999999999.AAAA`,
       ]) {
@@ -200,7 +202,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
       }
     });
 
-    it('il cookie non salta il controllo della password: con la password sbagliata resta 401', async () => {
+    it('the cookie does not skip the password check: with the wrong password it stays 401', async () => {
       const trusted = cookieValue(await login(h, EMAIL), 'trusted_device')!;
       await failN(5);
 
@@ -211,7 +213,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
       expect(res.status).toBe(401);
     });
 
-    it('il cookie e httpOnly, SameSite=Lax e limitato a /api/auth', async () => {
+    it('the cookie is httpOnly, SameSite=Lax and limited to /api/auth', async () => {
       const res = await login(h, EMAIL);
       const cookie = (res.headers['set-cookie'] as unknown as string[]).find(
         (c) => c.startsWith('trusted_device='),
@@ -222,7 +224,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  it('con richieste parallele passano al massimo 5 tentativi: gli altri sono bloccati senza controllare la password', async () => {
+  it('with parallel requests at most 5 attempts get through: the others are blocked without checking the password', async () => {
     const results = await Promise.all(
       Array.from({ length: 30 }, () => login(h, EMAIL, WRONG)),
     );
@@ -233,7 +235,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     expect(blocked).toBe(25);
   });
 
-  it('la password giusta non e un tentativo in piu: con 4 errori in corso, un login riuscito azzera tutto anche in parallelo agli errori', async () => {
+  it('the right password is not one more attempt: with 4 errors pending, a successful login resets everything even in parallel with the errors', async () => {
     await Promise.all([
       login(h, EMAIL, WRONG),
       login(h, EMAIL, WRONG),
@@ -243,7 +245,7 @@ describe('D2 - blocco per account (e2e, PostgreSQL vero)', () => {
     expect(await attempts()).toHaveLength(0);
   });
 
-  it('richieste parallele di password errate non fanno saltare nulla e il blocco scatta', async () => {
+  it('parallel requests with wrong passwords break nothing and the lock triggers', async () => {
     const results = await Promise.all(
       Array.from({ length: 10 }, () => login(h, EMAIL, WRONG)),
     );

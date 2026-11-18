@@ -7,17 +7,17 @@ import { LoginAttempt } from '../../common/entities/login-attempt.entity';
 import { normalizeEmail } from '../../common/utils/email';
 
 /**
- * Blocco temporaneo e progressivo per ACCOUNT, in aggiunta al limite per IP.
+ * Temporary, progressive lock per ACCOUNT, on top of the per-IP limit.
  *
- * - dopo `maxFailed` errori consecutivi l'account si blocca per `base` secondi; ogni
- *   blocco successivo raddoppia, fino a `max` (default 5 errori, 60 s -> 900 s);
- * - il tentativo si conta PRIMA di verificare la password, in modo atomico (riga bloccata): con
- *   richieste parallele passano al massimo `maxFailed` tentativi, non uno per richiesta;
- * - durante il blocco i tentativi NON vengono valutati ne' contati: non lo prolungano;
- * - dopo un blocco servono altri `maxFailed` errori per il successivo (non basta 1);
- * - i contatori decadono dopo `window` secondi senza tentativi; un login riuscito li azzera;
- * - la chiave e' l'hash dell'email: stesso comportamento per account inesistenti.
- * Il proprietario non puo' essere escluso all'infinito: vedi trusted-device.ts e il reset password.
+ * - after `maxFailed` consecutive failures the account is locked for `base` seconds; each
+ *   following lock doubles, up to `max` (default 5 failures, 60 s -> 900 s);
+ * - the attempt is counted BEFORE verifying the password, atomically (locked row): with
+ *   parallel requests at most `maxFailed` attempts get through, not one per request;
+ * - during the lock attempts are NOT evaluated or counted: they do not extend it;
+ * - after a lock another `maxFailed` failures are needed for the next one (1 is not enough);
+ * - the counters decay after `window` seconds without attempts; a successful login resets them;
+ * - the key is the hash of the email: same behaviour for non-existent accounts.
+ * The owner cannot be shut out forever: see trusted-device.ts and the password reset.
  */
 @Injectable()
 export class LoginAttemptService {
@@ -50,16 +50,16 @@ export class LoginAttemptService {
   }
 
   /**
-   * Conta un tentativo di login PRIMA di controllare la password e dice se l'account e' bloccato.
-   * Tutto avviene con la riga dell'account bloccata (transazione): richieste concorrenti si
-   * mettono in fila, quindi non si possono fare piu' prove del consentito. Il tentativo che
-   * raggiunge la soglia fa scattare il blocco subito, e un login riuscito lo cancella (reset).
-   * Se l'account e' gia' bloccato non conta nulla: i tentativi durante il blocco non lo prolungano.
+   * Counts a login attempt BEFORE checking the password and says whether the account is locked.
+   * Everything happens with the account row locked (transaction): concurrent requests
+   * queue up, so no more guesses than allowed can be made. The attempt that
+   * reaches the threshold triggers the lock immediately, and a successful login clears it (reset).
+   * If the account is already locked nothing is counted: attempts during the lock do not extend it.
    */
   async registerAttempt(email: string): Promise<{ locked: boolean }> {
     const identifier = LoginAttemptService.identifierFor(email);
     return this.repository.manager.transaction(async (tx) => {
-      // Il finto DO UPDATE serve a bloccare la riga (anche appena creata) fino al commit.
+      // The fake DO UPDATE locks the row (even a newly created one) until commit.
       const [row] = await tx.query<
         {
           failedCount: number;
@@ -77,7 +77,7 @@ export class LoginAttemptService {
       );
       if (row.locked) return { locked: true };
 
-      // Fuori finestra (nessun tentativo da troppo tempo) si riparte da zero.
+      // Outside the window (no attempts for too long) start again from zero.
       const level = row.stale ? 0 : row.lockLevel;
       const count = (row.stale ? 0 : row.failedCount) + 1;
 
@@ -103,14 +103,14 @@ export class LoginAttemptService {
     });
   }
 
-  /** Login riuscito o password reimpostata: si riparte da zero. */
+  /** Successful login or password reset: start again from zero. */
   async reset(email: string): Promise<void> {
     await this.repository.delete({
       identifier: LoginAttemptService.identifierFor(email),
     });
   }
 
-  /** Pulizia: elimina i record non piu' bloccati e fuori dalla finestra. */
+  /** Cleanup: deletes the records that are no longer locked and are outside the window. */
   async deleteStale(): Promise<number> {
     const result = await this.repository
       .createQueryBuilder()

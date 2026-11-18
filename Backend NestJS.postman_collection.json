@@ -44,7 +44,7 @@
 								"register"
 							]
 						},
-						"description": "Risponde sempre 202 con lo stesso corpo, anche se l'indirizzo e' gia' registrato. In sviluppo l'email di verifica arriva su Mailpit: http://localhost:8025"
+						"description": "Always answers 202 with the same body, even if the address is already registered. In development the verification email arrives in Mailpit: http://localhost:8025"
 					},
 					"response": []
 				},
@@ -125,7 +125,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"token\": \"<token ricevuto via email>\",\n  \"password\": \"MyStrongPassword123!\"\n}",
+							"raw": "{\n  \"token\": \"<token received by email>\",\n  \"password\": \"MyStrongPassword123!\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -145,7 +145,7 @@
 								"verify-email"
 							]
 						},
-						"description": "Conferma l'indirizzo email con il token del link e sceglie la password dell'account (sostituisce quella della registrazione). Monouso, con scadenza."
+						"description": "Confirms the email address with the token from the link and chooses the account's password (it replaces the one from registration). Single-use, with an expiry."
 					}
 				},
 				{
@@ -183,7 +183,7 @@
 								"resend-verification"
 							]
 						},
-						"description": "Risponde sempre 202. Invia una nuova email solo se l'account esiste e non e' verificato."
+						"description": "Always answers 202. Sends a new email only if the account exists and is not verified."
 					}
 				},
 				{
@@ -221,7 +221,7 @@
 								"forgot-password"
 							]
 						},
-						"description": "Risponde sempre 202. Se l'account esiste invia il link di reset (vale 1 ora)."
+						"description": "Always answers 202. If the account exists it sends the reset link (valid for 1 hour)."
 					}
 				},
 				{
@@ -239,7 +239,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"token\": \"<token ricevuto via email>\",\n  \"password\": \"myNewSecurePassword\"\n}",
+							"raw": "{\n  \"token\": \"<token received by email>\",\n  \"password\": \"myNewSecurePassword\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -259,7 +259,7 @@
 								"reset-password"
 							]
 						},
-						"description": "Imposta la nuova password e revoca TUTTE le sessioni."
+						"description": "Sets the new password and revokes ALL sessions."
 					}
 				},
 				{
@@ -297,7 +297,7 @@
 								"refresh"
 							]
 						},
-						"description": "Ruota il refresh token (cookie refresh_token, inviato solo a /api/auth). Un token gia' usato revoca la sessione."
+						"description": "Rotates the refresh token (refresh_token cookie, only sent to /api/auth). A token that was already used revokes the session."
 					}
 				}
 			]

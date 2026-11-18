@@ -1,7 +1,7 @@
 /**
- * B3 - Google: parametro `state` anti-CSRF (PostgreSQL vero, strategia Google reale a rete stubbata).
- * Prima: nessun `state`, quindi un attaccante poteva far completare alla vittima un
- * callback con il PROPRIO code (login CSRF / account swap).
+ * B3 - Google: anti-CSRF `state` parameter (real PostgreSQL, real Google strategy with stubbed network).
+ * Before: no `state`, so an attacker could make the victim complete a
+ * callback with the attacker's OWN code (login CSRF / account swap).
  */
 import request from 'supertest';
 import { createHarness, Harness } from './support/harness';
@@ -20,7 +20,7 @@ const PROFILE = {
   email_verified: true,
 };
 
-describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
+describe('B3 - Google state (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -48,8 +48,8 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       .get('/api/auth/google/callback')
       .query({ code: h.google.codeFor(info), ...params });
 
-  describe('avvio del flusso (GET /auth/google)', () => {
-    it('il redirect verso Google contiene un state non banale', async () => {
+  describe('flow start (GET /auth/google)', () => {
+    it('the redirect to Google contains a non-trivial state', async () => {
       const res = await browser(h).get('/api/auth/google');
 
       expect(res.status).toBe(302);
@@ -59,7 +59,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(stateOf(res)).toMatch(/^[\w-]{30,}$/);
     });
 
-    it('imposta un cookie oauth_state httpOnly, SameSite=Lax, limitato al percorso Google e a breve durata', async () => {
+    it('sets an oauth_state cookie that is httpOnly, SameSite=Lax, limited to the Google path and short-lived', async () => {
       const res = await browser(h).get('/api/auth/google');
 
       const cookie = findSetCookie(res, 'oauth_state');
@@ -70,7 +70,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(cookie).toMatch(/Max-Age=\d+|Expires=/i);
     });
 
-    it('il cookie e firmato: non contiene soltanto il nonce', async () => {
+    it('the cookie is signed: it does not contain just the nonce', async () => {
       const res = await browser(h).get('/api/auth/google');
       const value = cookieValue(res, 'oauth_state')!;
       const state = stateOf(res)!;
@@ -80,7 +80,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(value.split('.').length).toBeGreaterThanOrEqual(2);
     });
 
-    it('ogni avvio ha un state diverso', async () => {
+    it('every start has a different state', async () => {
       const a = stateOf(await browser(h).get('/api/auth/google'));
       const b = stateOf(await browser(h).get('/api/auth/google'));
       expect(a).not.toBe(b);
@@ -88,7 +88,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
   });
 
   describe('callback', () => {
-    it('con state corretto completa il login', async () => {
+    it('with the correct state completes the login', async () => {
       const { callback: res } = await googleLogin(h.app, h.google, PROFILE);
 
       expect(res.status).toBeLessThan(400);
@@ -96,7 +96,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(await userCount()).toBe(1);
     });
 
-    it('senza state viene rifiutato: nessuna sessione e nessun utente creato', async () => {
+    it('without a state it is rejected: no session and no user created', async () => {
       const client = browser(h);
       await client.get('/api/auth/google');
 
@@ -107,7 +107,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(await userCount()).toBe(0);
     });
 
-    it('con state sbagliato viene rifiutato', async () => {
+    it('with a wrong state it is rejected', async () => {
       const client = browser(h);
       await client.get('/api/auth/google');
 
@@ -119,10 +119,10 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(await userCount()).toBe(0);
     });
 
-    it("login CSRF: lo state/code dell'attaccante presentato dal browser della vittima (senza cookie) viene rifiutato", async () => {
+    it("login CSRF: the attacker's state/code presented by the victim's browser (without the cookie) is rejected", async () => {
       const attacker = browser(h);
       const attackerState = stateOf(await attacker.get('/api/auth/google'))!;
-      const victim = browser(h); // nessun cookie oauth_state
+      const victim = browser(h); // no oauth_state cookie
 
       const res = await callback(victim, { state: attackerState });
 
@@ -130,7 +130,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(await userCount()).toBe(0);
     });
 
-    it('lo state di un browser non vale per un altro browser', async () => {
+    it('the state of one browser is not valid for another browser', async () => {
       const a = browser(h);
       const b = browser(h);
       const stateA = stateOf(await a.get('/api/auth/google'))!;
@@ -141,7 +141,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(cookieNames(res)).not.toContain('access_token');
     });
 
-    it('un cookie forgiato (nonce scelto da chi attacca, firma inventata) viene rifiutato', async () => {
+    it('a forged cookie (nonce chosen by the attacker, made-up signature) is rejected', async () => {
       const nonce = 'attacker-chosen-nonce-0123456789abcdef';
       const res = await request(h.app.getHttpServer())
         .get('/api/auth/google/callback')
@@ -155,7 +155,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(await userCount()).toBe(0);
     });
 
-    it('lo state e monouso: dopo il successo il cookie viene cancellato e il replay fallisce', async () => {
+    it('the state is single-use: after success the cookie is cleared and the replay fails', async () => {
       const client = browser(h);
       const init = await client.get('/api/auth/google');
       const state = stateOf(init)!;
@@ -167,7 +167,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
         /oauth_state=;|Expires=Thu, 01 Jan 1970/i,
       );
 
-      // replay: anche se qualcuno ripresenta il vecchio cookie, un secondo browser pulito non ha piu nulla
+      // replay: even if someone presents the old cookie again, a second clean browser has nothing left
       const replay = await request(h.app.getHttpServer())
         .get('/api/auth/google/callback')
         .query({ code: h.google.codeFor(PROFILE), state });
@@ -175,7 +175,7 @@ describe('B3 - state Google (e2e, PostgreSQL vero)', () => {
       expect(cookie).toBeDefined();
     });
 
-    it('un callback con errore di Google (utente nega il consenso) non crea sessioni nemmeno con state valido', async () => {
+    it('a callback with a Google error (user denies consent) creates no sessions even with a valid state', async () => {
       const client = browser(h);
       const state = stateOf(await client.get('/api/auth/google'))!;
 

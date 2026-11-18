@@ -2,10 +2,10 @@ import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { parseFrontendUrls } from '../../common/utils/frontend-url';
 
-/** Pagina del frontend che riceve l'esito del login con Google (percorso fisso). */
+/** Frontend page that receives the outcome of the Google login (fixed path). */
 export const FRONTEND_AUTH_CALLBACK_PATH = '/auth/callback';
 
-/** Whitelist delle origini del frontend (FRONTEND_URL, validata all'avvio). */
+/** Whitelist of the frontend origins (FRONTEND_URL, validated at startup). */
 export function frontendOrigins(configService: ConfigService): string[] {
   return parseFrontendUrls(
     configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000',
@@ -13,10 +13,10 @@ export function frontendOrigins(configService: ConfigService): string[] {
 }
 
 /**
- * Sceglie l'origine di ritorno richiesta con `?redirect_to=`: deve coincidere
- * ESATTAMENTE con una origine della whitelist (si confronta `URL.origin`, quindi
- * `http://app.example.com@evil.com` o `http://app.example.com.evil.com` non passano).
- * Ritorna l'indice nella whitelist: e' quello che si firma nel cookie, mai l'URL.
+ * Picks the return origin requested with `?redirect_to=`: it must match EXACTLY
+ * an origin in the whitelist (`URL.origin` is compared, so
+ * `http://app.example.com@evil.com` or `http://app.example.com.evil.com` do not pass).
+ * Returns the index in the whitelist: that is what gets signed in the cookie, never the URL.
  */
 export function resolveRedirectIndex(
   origins: string[],
@@ -37,8 +37,8 @@ export function resolveRedirectIndex(
 }
 
 /**
- * URL di ritorno al frontend. Parte SEMPRE da un'origine della whitelist e da un
- * percorso fisso: nessuna parte arriva dalla richiesta (niente open redirect).
+ * Return URL to the frontend. It ALWAYS starts from an origin in the whitelist and a
+ * fixed path: no part comes from the request (no open redirect).
  */
 export function buildFrontendRedirect(
   origins: string[],

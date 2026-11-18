@@ -1,4 +1,4 @@
-/** E - reimpostazione della password (unit). Il comportamento sul database vero e' in test/db/e-password-reset.e2e-spec.ts. */
+/** E - password reset (unit). The behaviour on the real database is in test/db/e-password-reset.e2e-spec.ts. */
 import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -47,7 +47,7 @@ describe('AuthService.resetPassword (E)', () => {
     service = module.get(AuthService);
   });
 
-  it('consuma il token di tipo PASSWORD_RESET e imposta la nuova password hashata', async () => {
+  it('consumes the PASSWORD_RESET token and sets the new hashed password', async () => {
     mockAuthTokenService.consume.mockResolvedValue('u1');
     userService.getUserById.mockResolvedValue(user);
 
@@ -67,7 +67,7 @@ describe('AuthService.resetPassword (E)', () => {
     expect(bcrypt.getRounds(hash)).toBe(4);
   });
 
-  it('invalida tutto: refresh token, token pendenti e blocco per tentativi falliti', async () => {
+  it('invalidates everything: refresh tokens, pending tokens and the failed-attempt lock', async () => {
     mockAuthTokenService.consume.mockResolvedValue('u1');
     userService.getUserById.mockResolvedValue(user);
 
@@ -80,7 +80,7 @@ describe('AuthService.resetPassword (E)', () => {
     );
   });
 
-  it('token non valido, scaduto o gia usato: 400 e nessuna modifica', async () => {
+  it('invalid, expired or already used token: 400 and no change', async () => {
     mockAuthTokenService.consume.mockResolvedValue(null);
 
     await expect(
@@ -91,7 +91,7 @@ describe('AuthService.resetPassword (E)', () => {
     expect(mockLoginAttemptService.reset).not.toHaveBeenCalled();
   });
 
-  it('utente cancellato nel frattempo: 400 con lo stesso messaggio', async () => {
+  it('user deleted in the meantime: 400 with the same message', async () => {
     mockAuthTokenService.consume.mockResolvedValue('u1');
     userService.getUserById.mockResolvedValue(null);
 

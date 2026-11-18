@@ -4,9 +4,9 @@ import { RefreshToken } from '../../src/common/entities/refresh-token.entity';
 import { MailService } from '../../src/modules/mail/mail.service';
 
 /**
- * Dipendenze "nuove" che gli e2e con repository mockati devono comunque sostituire:
- * repository dei token monouso e invio email (mai SMTP vero in questi test).
- * Quando AppModule acquisisce un repository o un servizio esterno nuovo, si aggiunge QUI.
+ * "New" dependencies that the mocked-repository e2e tests must replace anyway:
+ * the repository of the single-use tokens and the email sending (never a real SMTP in these tests).
+ * When AppModule gets a new repository or external service, it is added HERE.
  */
 export { AuthToken, LoginAttempt, RefreshToken, MailService };
 
@@ -18,15 +18,18 @@ export const authTokenRepositoryMock = () => ({
 });
 
 /**
- * Repository dei refresh token per gli e2e a repository mockati: ogni rotazione
- * riesce (UPDATE ... RETURNING simulato). La rotazione vera, il riuso e la revoca
- * sono verificati contro PostgreSQL in test/db/b1-refresh-rotation.e2e-spec.ts.
+ * Refresh token repository for the mocked-repository e2e tests: every rotation
+ * succeeds (simulated UPDATE ... RETURNING) and every session is active (the query of
+ * `findActiveSession` returns `tokenVersion`). Real rotation, reuse, revocation and
+ * immediate logout are verified against PostgreSQL in test/db/b1-refresh-rotation.e2e-spec.ts
+ * and test/db/g1-session-logout.e2e-spec.ts.
  */
 export const refreshTokenRepositoryMock = (
   rotatedRow: { userId: string; familyId: string } = {
     userId: 'user-local-uuid',
     familyId: 'family-e2e',
   },
+  activeSession: { tokenVersion: number } | undefined = { tokenVersion: 0 },
 ) => {
   const queryBuilder = {
     update: jest.fn().mockReturnThis(),
@@ -34,6 +37,11 @@ export const refreshTokenRepositoryMock = (
     where: jest.fn().mockReturnThis(),
     returning: jest.fn().mockReturnThis(),
     execute: jest.fn().mockResolvedValue({ raw: [rotatedRow] }),
+    innerJoin: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    getRawOne: jest.fn().mockResolvedValue(activeSession),
   };
   return {
     insert: jest.fn().mockResolvedValue({}),
@@ -44,10 +52,9 @@ export const refreshTokenRepositoryMock = (
   };
 };
 
-/** Nessun account bloccato; i conteggi veri sono verificati in test/db/d2-login-lockout.e2e-spec.ts. */
 /**
- * Nessun account bloccato: la transazione di `registerAttempt` vede sempre una riga
- * "pulita". Il blocco vero e' verificato su PostgreSQL in test/db/d2-login-lockout.e2e-spec.ts.
+ * No locked account: the transaction of `registerAttempt` always sees a "clean"
+ * row. The real lock is verified on PostgreSQL in test/db/d2-login-lockout.e2e-spec.ts.
  */
 export const loginAttemptRepositoryMock = () => {
   const tx = {

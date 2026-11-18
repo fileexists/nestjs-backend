@@ -1,12 +1,12 @@
 /**
- * Lo schema ottenuto applicando le migrazioni deve coincidere con quello descritto
- * dalle entita: se qualcuno cambia un'entita senza scrivere la migrazione (o viceversa)
- * il test lo segnala, invece di lasciare che `migration:generate` lo scopra mesi dopo.
+ * The schema obtained by applying the migrations must match the one described
+ * by the entities: if someone changes an entity without writing the migration (or vice versa)
+ * the test flags it, instead of letting `migration:generate` find out months later.
  */
 import { DataSource } from 'typeorm';
 import { createDataSource, resetDatabase } from './support/database';
 
-describe('schema (e2e, PostgreSQL vero)', () => {
+describe('schema (e2e, real PostgreSQL)', () => {
   let db: DataSource;
 
   beforeAll(async () => {
@@ -17,12 +17,12 @@ describe('schema (e2e, PostgreSQL vero)', () => {
     await db?.destroy();
   });
 
-  it('le migrazioni producono lo stesso schema delle entita (nessuna differenza)', async () => {
+  it('the migrations produce the same schema as the entities (no difference)', async () => {
     const { upQueries } = await db.driver.createSchemaBuilder().log();
     expect(upQueries.map((q) => q.query)).toEqual([]);
   });
 
-  it('cancellare un permesso assegnato toglie i collegamenti agli utenti, non gli utenti', async () => {
+  it('deleting an assigned permission removes the links to the users, not the users', async () => {
     const [user] = await db.query<{ id: string }[]>(
       `INSERT INTO users (email, provider) VALUES ('fk@example.com', 'local') RETURNING id`,
     );

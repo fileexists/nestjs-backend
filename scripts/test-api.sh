@@ -13,7 +13,7 @@
 set -euo pipefail
 
 BASE_URL="${1:-http://localhost:5000}"
-# Le email di sviluppo finiscono in Mailpit: da li' si legge il token di verifica.
+# Development emails end up in Mailpit: the verification token is read from there.
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
 COOKIE_JAR="$(mktemp /tmp/nestjs-cookies.XXXXXX)"
 PASS=0
@@ -52,7 +52,7 @@ DEL()  { curl -s -o /tmp/_body -w "%{http_code}" -b "$COOKIE_JAR" -c "$COOKIE_JA
               -X DELETE "$BASE_URL$1"; }
 BODY() { cat /tmp/_body; }
 
-# Legge da Mailpit il token di verifica inviato a $1 e lo conferma via API.
+# Reads from Mailpit the verification token sent to $1 and confirms it via the API.
 verify_email() {
   local email="$1" id token
   id=$(curl -s "$MAILPIT_URL/api/v1/search?query=to:$email" | jq -r '.messages[0].ID // empty')
@@ -85,7 +85,7 @@ STATUS=$(POST "/api/auth/register" "{\"email\":\"$TEST_EMAIL\",\"password\":\"$T
 assert_status "POST /api/auth/register (new user) → 202" "202" "$STATUS"
 NEW_BODY="$(BODY)"
 
-# Risposta uniforme: un indirizzo gia' registrato non si distingue da uno nuovo.
+# Uniform response: an already registered address is indistinguishable from a new one.
 STATUS=$(POST "/api/auth/register" "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}")
 assert_status "POST /api/auth/register (duplicate) → 202, same as new" "202" "$STATUS"
 if [[ "$(BODY)" == "$NEW_BODY" ]]; then ok "Register: identical body for new and existing address";

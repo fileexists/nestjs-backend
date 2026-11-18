@@ -44,7 +44,7 @@ export class UserSeeder {
       password: hashedPassword,
       permissions: validPermissions,
       provider: 'local',
-      // Creato da un operatore (non auto-registrato): l'email e' considerata verificata.
+      // Created by an operator (not self-registered): the email is considered verified.
       emailVerifiedAt: new Date(),
     });
 

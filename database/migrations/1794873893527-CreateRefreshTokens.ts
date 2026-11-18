@@ -1,8 +1,8 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
 /**
- * B1 - Rotazione reale dei refresh token: un record per ogni token emesso
- * (hash del jti, famiglia di sessione, usato/revocato, scadenza).
+ * B1 - Real refresh token rotation: one record per issued token
+ * (jti hash, session family, used/revoked, expiry).
  */
 export class CreateRefreshTokens1794873893527 implements MigrationInterface {
     name = 'CreateRefreshTokens1794873893527'

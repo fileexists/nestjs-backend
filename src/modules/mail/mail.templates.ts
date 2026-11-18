@@ -11,14 +11,14 @@ const escapeHtml = (value: string): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-/** "24 ore", "1 ora", "30 minuti": per dire all'utente quanto vale il link. */
+/** "24 hours", "1 hour", "30 minutes": to tell the user how long the link is valid. */
 export function humanizeTtl(ms: number): string {
   const minutes = Math.max(1, Math.round(ms / 60_000));
-  if (minutes < 60) return minutes === 1 ? '1 minuto' : `${minutes} minuti`;
+  if (minutes < 60) return minutes === 1 ? '1 minute' : `${minutes} minutes`;
   const hours = Math.round(minutes / 60);
-  if (hours < 48) return hours === 1 ? '1 ora' : `${hours} ore`;
+  if (hours < 48) return hours === 1 ? '1 hour' : `${hours} hours`;
   const days = Math.round(hours / 24);
-  return `${days} giorni`;
+  return `${days} days`;
 }
 
 function layout(
@@ -36,7 +36,7 @@ function layout(
     ...(action
       ? [
           `<p><a href="${escapeHtml(action.url)}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none">${escapeHtml(action.label)}</a></p>`,
-          `<p style="font-size:13px;color:#52606d">Se il pulsante non funziona, copia questo indirizzo nel browser:<br>${escapeHtml(action.url)}</p>`,
+          `<p style="font-size:13px;color:#52606d">If the button does not work, copy this address into your browser:<br>${escapeHtml(action.url)}</p>`,
         ]
       : []),
     `</div>`,
@@ -46,13 +46,13 @@ function layout(
 
 export function verificationEmail(link: string, ttlMs: number): MailContent {
   return layout(
-    'Conferma il tuo indirizzo email',
+    'Confirm your email address',
     [
-      'Ciao,',
-      `abbiamo ricevuto una richiesta di registrazione con questo indirizzo. Per attivare l'account conferma la tua email e scegli la tua password: il link vale ${humanizeTtl(ttlMs)} e si può usare una sola volta.`,
-      "Se non sei stato tu, ignora questo messaggio: senza conferma l'account non viene attivato.",
+      'Hi,',
+      `we received a registration request with this address. To activate the account, confirm your email and choose your password: the link is valid for ${humanizeTtl(ttlMs)} and can be used only once.`,
+      'If this was not you, ignore this message: the account is not activated without confirmation.',
     ],
-    { label: 'Conferma email e scegli la password', url: link },
+    { label: 'Confirm email and choose a password', url: link },
   );
 }
 
@@ -61,25 +61,25 @@ export function registrationNoticeEmail(
   resetUrl: string,
 ): MailContent {
   return layout(
-    'Tentativo di registrazione con il tuo indirizzo',
+    'Registration attempt with your address',
     [
-      'Ciao,',
-      'qualcuno ha provato a registrarsi con questo indirizzo email, ma esiste già un account associato.',
-      'Se sei stato tu, accedi con le tue credenziali oppure, se non ricordi la password, reimpostala. Se non sei stato tu, ignora questo messaggio: il tuo account non è stato modificato.',
-      `Reimposta la password: ${resetUrl}`,
+      'Hi,',
+      'someone tried to register with this email address, but an account already exists for it.',
+      'If it was you, sign in with your credentials or, if you do not remember your password, reset it. If it was not you, ignore this message: your account has not been changed.',
+      `Reset your password: ${resetUrl}`,
     ],
-    { label: 'Accedi', url: loginUrl },
+    { label: 'Sign in', url: loginUrl },
   );
 }
 
 export function passwordResetEmail(link: string, ttlMs: number): MailContent {
   return layout(
-    'Reimposta la tua password',
+    'Reset your password',
     [
-      'Ciao,',
-      `abbiamo ricevuto una richiesta per reimpostare la password di questo account. Il link vale ${humanizeTtl(ttlMs)} e si può usare una sola volta; dopo il cambio tutte le sessioni attive verranno chiuse.`,
-      'Se non sei stato tu, ignora questo messaggio: la tua password non cambierà.',
+      'Hi,',
+      `we received a request to reset the password of this account. The link is valid for ${humanizeTtl(ttlMs)} and can be used only once; after the change all active sessions will be closed.`,
+      'If this was not you, ignore this message: your password will not change.',
     ],
-    { label: 'Reimposta la password', url: link },
+    { label: 'Reset your password', url: link },
   );
 }
