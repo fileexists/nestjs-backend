@@ -2,9 +2,9 @@ export interface TokenPayload {
   id?: string;
   email?: string;
   tokenVersion?: number;
-  /** ID univoco del refresh token (registrato in `refresh_tokens`). */
+  /** Unique ID of the refresh token (recorded in `refresh_tokens`). */
   jti?: string;
-  /** Famiglia (sessione) del refresh token. */
+  /** Family (session): the same in the access and the refresh token of a device. */
   fid?: string;
   iat?: number;
   exp?: number;

@@ -1,57 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Expose, Transform, Type } from 'class-transformer';
-import { IsEmail, IsOptional, IsString, Length } from 'class-validator';
-import { Permission } from '../entities/permission.entity';
-import { NormalizeEmail } from './normalize-email.decorator';
 
-export class CreateUserDto {
-  @NormalizeEmail()
-  @IsEmail()
-  email: string;
-
-  @IsOptional()
-  @IsString()
-  @Length(8, 255)
-  password?: string;
-
-  @IsOptional()
-  @IsString()
-  @Length(1, 255)
-  googleId?: string;
-
-  @IsOptional()
-  @IsString()
-  @Length(1, 50)
-  provider?: string;
-
-  permissions: Permission[];
-}
-
-export class UpdateUserDto {
-  @IsOptional()
-  @NormalizeEmail()
-  @IsEmail()
-  email?: string;
-
-  @IsOptional()
-  @IsString()
-  @Length(8, 255)
-  password?: string;
-
-  @IsOptional()
-  @IsString()
-  googleId?: string;
-
-  @IsOptional()
-  @IsString()
-  @Length(1, 50)
-  provider?: string;
-
-  @IsOptional()
-  permissions?: Permission[];
-}
-
-/** Permesso come lo vede il client: niente relazione `users`, niente altro. */
+/** Permission as the client sees it: no `users` relation, nothing else. */
 export class PermissionResponseDto {
   @Expose()
   @ApiProperty()
@@ -67,10 +17,10 @@ export class PermissionResponseDto {
 }
 
 /**
- * Risposta pubblica di GET /user/me. E' una WHITELIST: si usa con
- * `plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true })`, quindi
- * solo i campi marcati @Expose() escono. Campi interni come `password`, `tokenVersion`,
- * `googleId` ed `emailVerifiedAt` non possono comparire nemmeno aggiungendoli all'entita'.
+ * Public response of GET /user/me. It is a WHITELIST: use it with
+ * `plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true })`, so
+ * only the fields marked @Expose() come out. Internal fields such as `password`, `tokenVersion`,
+ * `googleId` and `emailVerifiedAt` cannot show up even if they are added to the entity.
  */
 export class UserResponseDto {
   @Expose()
@@ -86,14 +36,14 @@ export class UserResponseDto {
   provider?: string;
 
   @Expose()
-  // toClassOnly: si calcola dall'entita'; nella serializzazione di ritorno (instanceToPlain)
-  // il valore e' gia' quello giusto e `obj` non ha piu' emailVerifiedAt.
+  // toClassOnly: computed from the entity; on the way back (instanceToPlain)
+  // the value is already the right one and `obj` no longer has emailVerifiedAt.
   @Transform(
     ({ obj }: { obj: { emailVerifiedAt?: Date | null } }) =>
       Boolean(obj.emailVerifiedAt),
     { toClassOnly: true },
   )
-  @ApiProperty({ description: "True se l'email e' stata verificata" })
+  @ApiProperty({ description: 'True if the email has been verified' })
   emailVerified: boolean;
 
   @Expose()

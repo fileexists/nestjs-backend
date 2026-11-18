@@ -24,7 +24,7 @@ export class UserService {
     private readonly userRepository: Repository<User>,
   ) {}
 
-  /** Una violazione di unicita' (email o googleId gia' presenti, anche per corsa) diventa 409, mai 500. */
+  /** A uniqueness violation (email or googleId already present, even from a race) becomes 409, never 500. */
   async createUser(data: Partial<User>): Promise<User> {
     const user = this.userRepository.create(
       data.email ? { ...data, email: normalizeEmail(data.email) } : data,
@@ -58,15 +58,6 @@ export class UserService {
       where: { id },
       relations: { permissions: true },
     });
-  }
-
-  /** Stato minimo per validare una sessione a ogni richiesta (una query per chiave primaria). */
-  async getAuthState(id: string): Promise<{ tokenVersion: number } | null> {
-    const user = await this.userRepository.findOne({
-      where: { id },
-      select: { id: true, tokenVersion: true },
-    });
-    return user ? { tokenVersion: user.tokenVersion } : null;
   }
 
   async getUserPermissions(id: string): Promise<Permission[] | null> {
@@ -108,10 +99,10 @@ export class UserService {
   }
 
   /**
-   * Conferma dell'email: l'account diventa verificato con la password scelta da chi ha
-   * confermato (quella della registrazione potrebbe essere di un altro). Solo se non e'
-   * gia' verificato: un token di verifica non deve mai cambiare la password di un account
-   * attivo. Ritorna false se l'account non esiste piu' o era gia' verificato.
+   * Email confirmation: the account becomes verified with the password chosen by whoever
+   * confirmed (the one from registration may belong to someone else). Only if it is not
+   * already verified: a verification token must never change the password of an
+   * active account. Returns false if the account no longer exists or was already verified.
    */
   async activateWithPassword(
     id: string,
@@ -125,11 +116,11 @@ export class UserService {
   }
 
   /**
-   * Google ha dimostrato il possesso dell'email di un account locale NON verificato:
-   * chi lo ha creato non e' necessariamente il proprietario, quindi la password
-   * viene azzerata e le sessioni invalidate (tokenVersion + 1) prima del collegamento.
-   * Un solo UPDATE condizionale: se nel frattempo l'account e' stato verificato non fa nulla
-   * e ritorna null.
+   * Google has proven ownership of the email of an UNVERIFIED local account:
+   * whoever created it is not necessarily the owner, so the password
+   * is wiped and the sessions invalidated (tokenVersion + 1) before linking.
+   * A single conditional UPDATE: if the account was verified in the meantime it does nothing
+   * and returns null.
    */
   async claimUnverifiedForGoogle(
     id: string,
@@ -150,9 +141,9 @@ export class UserService {
   }
 
   /**
-   * Password reimpostata via link email: nuova password, email considerata verificata (il link
-   * dimostra il possesso della casella), un account solo-Google diventa "combined" e le sessioni
-   * vengono invalidate (tokenVersion + 1). Un solo UPDATE.
+   * Password reset via email link: new password, email considered verified (the link
+   * proves ownership of the mailbox), a Google-only account becomes "combined" and the sessions
+   * are invalidated (tokenVersion + 1). A single UPDATE.
    */
   async resetPassword(id: string, passwordHash: string): Promise<void> {
     await this.userRepository.update(id, {

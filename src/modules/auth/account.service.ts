@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnApplicationShutdown,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthTokenType } from '../../common/entities/auth-token.entity';
 import { parseDurationMs } from '../../common/utils/duration';
@@ -8,18 +13,20 @@ import { AuthTokenService } from './auth-token.service';
 
 const DEFAULT_EMAIL_VERIFICATION_TTL = '24h';
 const DEFAULT_PASSWORD_RESET_TTL = '1h';
-/** Tra un invio e il successivo per lo stesso account. */
+/** Between one send and the next for the same account. */
 export const RESEND_COOLDOWN_MS = 60_000;
-/** Al massimo un avviso "indirizzo gia' registrato" ogni 10 minuti per la stessa casella. */
+/** At most one "address already registered" notice every 10 minutes for the same mailbox. */
 export const NOTICE_COOLDOWN_MS = 10 * 60_000;
+/** How long shutdown waits for the emails still being sent. */
+export const SHUTDOWN_DRAIN_TIMEOUT_MS = 20_000;
 
-/** Verifica dell'email e relativo reinvio. */
+/** Email verification and its resend. */
 @Injectable()
-export class AccountService {
+export class AccountService implements OnApplicationShutdown {
   private readonly logger = new Logger(AccountService.name);
   private readonly verificationTtlMs: number;
   private readonly passwordResetTtlMs: number;
-  /** Lavori in corso fuori dal ciclo della richiesta HTTP (vedi runInBackground). */
+  /** Jobs running outside the HTTP request cycle (see runInBackground). */
   private readonly background = new Set<Promise<void>>();
 
   constructor(
@@ -41,21 +48,21 @@ export class AccountService {
   }
 
   /**
-   * Esegue un lavoro SENZA farlo aspettare alla richiesta HTTP. Serve agli endpoint a risposta
-   * uniforme (reinvio verifica, reset password): se la risposta aspettasse database ed email, i
-   * tempi rivelerebbero se l'indirizzo ha un account. Gli errori vengono solo loggati.
+   * Runs a job WITHOUT making the HTTP request wait for it. Needed by the endpoints with a
+   * uniform response (resend verification, password reset): if the response waited for the database
+   * and the email, the timings would reveal whether the address has an account. Errors are only logged.
    */
   runInBackground(task: () => Promise<void>): void {
-    // setImmediate: il lavoro parte DOPO che la risposta e' stata scritta; con un semplice
-    // microtask le query dell'account esistente girerebbero prima e ritarderebbero (di poco,
-    // ma in modo misurabile) la risposta rispetto a un indirizzo sconosciuto.
+    // setImmediate: the job starts AFTER the response has been written; with a plain
+    // microtask the queries for an existing account would run first and would delay (slightly,
+    // but measurably) the response compared to an unknown address.
     const run: Promise<void> = new Promise<void>((resolve) =>
       setImmediate(resolve),
     )
       .then(task)
       .catch((error: unknown) => {
         this.logger.error(
-          `Operazione in background fallita: ${error instanceof Error ? error.message : String(error)}`,
+          `Background operation failed: ${error instanceof Error ? error.message : String(error)}`,
         );
       })
       .finally(() => {
@@ -64,11 +71,41 @@ export class AccountService {
     this.background.add(run);
   }
 
-  /** Attende i lavori in background in corso (spegnimento ordinato e test). */
-  async drain(): Promise<void> {
-    while (this.background.size > 0) {
-      await Promise.allSettled([...this.background]);
+  /**
+   * Waits for the background jobs in progress (graceful shutdown and tests). With `timeoutMs` it
+   * gives up after that long, logging how many jobs were left, so a hung SMTP cannot hold the
+   * shutdown forever.
+   */
+  async drain(timeoutMs?: number): Promise<void> {
+    const finished = (async () => {
+      while (this.background.size > 0) {
+        await Promise.allSettled([...this.background]);
+      }
+    })();
+    if (timeoutMs === undefined) return finished;
+
+    let timer: NodeJS.Timeout | undefined;
+    const outcome = await Promise.race([
+      finished.then(() => 'done' as const),
+      new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), timeoutMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (outcome === 'timeout') {
+      this.logger.warn(
+        `Shutdown: ${this.background.size} background operations did not finish within ${timeoutMs} ms (unsent emails are lost)`,
+      );
     }
+  }
+
+  /**
+   * On SIGTERM/SIGINT (`enableShutdownHooks` in main.ts) let the emails already queued go out
+   * before the process exits. There is no persistent queue: an email that is still failing after
+   * the retries, or that is in flight when the process is killed, is lost.
+   */
+  async onApplicationShutdown(): Promise<void> {
+    await this.drain(SHUTDOWN_DRAIN_TIMEOUT_MS);
   }
 
   queueResendVerification(email: string): void {
@@ -80,9 +117,9 @@ export class AccountService {
   }
 
   /**
-   * Invia il link di reset password. Non rivela mai se l'indirizzo esiste: per account
-   * inesistenti o troppo recenti non succede nulla. Vale anche per account non verificati
-   * (il reset dimostra il possesso della casella) e solo-Google (potranno impostare una password).
+   * Sends the password reset link. It never reveals whether the address exists: for
+   * non-existent or too recent accounts nothing happens. It also works for unverified accounts
+   * (the reset proves ownership of the mailbox) and Google-only ones (they will be able to set a password).
    */
   async requestPasswordReset(email: string): Promise<void> {
     const user = await this.userService.getUserByEmail(email);
@@ -107,9 +144,9 @@ export class AccountService {
   }
 
   /**
-   * Crea un token di verifica e invia l'email. L'invio NON e' atteso: la risposta
-   * HTTP non deve dipendere dalla latenza o dagli errori dell'SMTP (altrimenti
-   * i tempi rivelerebbero se l'indirizzo esiste); un errore viene solo loggato.
+   * Creates a verification token and sends the email. The send is NOT awaited: the HTTP
+   * response must not depend on SMTP latency or errors (otherwise the
+   * timings would reveal whether the address exists); an error is only logged.
    */
   async sendVerification(user: { id: string; email: string }): Promise<void> {
     const token = await this.authTokenService.issue(
@@ -121,9 +158,9 @@ export class AccountService {
   }
 
   /**
-   * Qualcuno ha provato a registrare un indirizzo che ha gia' un account: la risposta HTTP
-   * e' identica a quella di una registrazione nuova, quindi chi possiede la casella viene
-   * avvisato per email. Frequenza limitata per non poter inondare la casella di un altro.
+   * Someone tried to register an address that already has an account: the HTTP response
+   * is identical to that of a new registration, so whoever owns the mailbox is
+   * notified by email. Frequency is limited so someone else's mailbox cannot be flooded.
    */
   async sendRegistrationNotice(user: {
     id: string;
@@ -148,8 +185,8 @@ export class AccountService {
   }
 
   /**
-   * Conferma l'email con il token monouso e imposta la password scelta (gia' hashata).
-   * Il token viene consumato in ogni caso; se l'account era gia' verificato non cambia nulla.
+   * Confirms the email with the single-use token and sets the chosen (already hashed) password.
+   * The token is consumed in any case; if the account was already verified nothing changes.
    */
   async verifyEmail(token: string, passwordHash: string): Promise<void> {
     const userId = await this.authTokenService.consume(
@@ -165,8 +202,8 @@ export class AccountService {
   }
 
   /**
-   * Reinvia l'email di verifica. Non rivela mai se l'indirizzo esiste: per
-   * account inesistenti, gia' verificati o troppo recenti non succede nulla.
+   * Resends the verification email. It never reveals whether the address exists: for
+   * non-existent, already verified or too recent accounts nothing happens.
    */
   async resendVerification(email: string): Promise<void> {
     const user = await this.userService.getUserByEmail(email);

@@ -56,7 +56,6 @@ const mockUserService = {
   createUser: jest.fn(),
   updateUser: jest.fn(),
   incrementTokenVersion: jest.fn(),
-  getAuthState: jest.fn(),
 };
 
 const mockPermissionService = {
@@ -142,15 +141,15 @@ describe('AuthService', () => {
   // =========================================================================
 
   describe('generateJwtToken', () => {
-    it('should sign id, email AND tokenVersion with the access-token secret and expiry', async () => {
+    it('should sign id, email, tokenVersion AND the session family with the access-token secret and expiry', async () => {
       const user = buildUser({ tokenVersion: 4 });
       mockJwtService.signAsync.mockResolvedValue('signed.jwt.token');
 
-      const token = await service.generateJwtToken(user);
+      const token = await service.generateJwtToken(user, 'family-1');
 
       expect(mockJwtService.signAsync).toHaveBeenCalledTimes(1);
       expect(mockJwtService.signAsync).toHaveBeenCalledWith(
-        { id: user.id, email: user.email, tokenVersion: 4 },
+        { id: user.id, email: user.email, tokenVersion: 4, fid: 'family-1' },
         expect.objectContaining({
           secret: expect.any(String) as string,
           expiresIn: '15m',
@@ -167,7 +166,7 @@ describe('AuthService', () => {
       const user = buildUser({ permissions: [permission] });
       mockJwtService.signAsync.mockResolvedValue('token');
 
-      await service.generateJwtToken(user);
+      await service.generateJwtToken(user, 'family-1');
 
       const callArgs = mockJwtService.signAsync.mock.calls[0][0] as Record<
         string,
@@ -262,7 +261,7 @@ describe('AuthService', () => {
       const user = buildUser({ tokenVersion: 5 });
       mockJwtService.signAsync.mockResolvedValue('access.token');
 
-      await service.generateJwtToken(user);
+      await service.generateJwtToken(user, 'family-1');
 
       const callArgs = mockJwtService.signAsync.mock.calls[0][0] as Record<
         string,
@@ -282,9 +281,12 @@ describe('AuthService', () => {
         id: 'uuid-1234',
         email: 'test@example.com',
         tokenVersion: 0,
+        fid: 'family-1',
       };
       mockJwtService.verifyAsync.mockResolvedValue(payload);
-      mockUserService.getAuthState.mockResolvedValue({ tokenVersion: 0 });
+      mockRefreshTokenService.findActiveSession.mockResolvedValue({
+        tokenVersion: 0,
+      });
 
       await expect(service.verifyJwtToken('valid.jwt.token')).resolves.toEqual(
         payload,
@@ -295,8 +297,11 @@ describe('AuthService', () => {
       mockJwtService.verifyAsync.mockResolvedValue({
         id: 'uuid-1234',
         tokenVersion: 0,
+        fid: 'family-1',
       });
-      mockUserService.getAuthState.mockResolvedValue({ tokenVersion: 1 });
+      mockRefreshTokenService.findActiveSession.mockResolvedValue({
+        tokenVersion: 1,
+      });
 
       await expect(service.verifyJwtToken('stale.jwt')).rejects.toBeInstanceOf(
         UnauthorizedException,
@@ -327,42 +332,77 @@ describe('AuthService', () => {
   });
 
   describe('assertSessionCurrent', () => {
-    it('accepts a payload whose tokenVersion matches the database', async () => {
-      mockUserService.getAuthState.mockResolvedValue({ tokenVersion: 2 });
+    const payload = { id: 'u1', tokenVersion: 2, fid: 'family-1' };
+
+    it('accepts an active session whose tokenVersion matches (also after a rotation: only the family matters)', async () => {
+      mockRefreshTokenService.findActiveSession.mockResolvedValue({
+        tokenVersion: 2,
+      });
+
       await expect(
-        service.assertSessionCurrent({ id: 'u1', tokenVersion: 2 }),
+        service.assertSessionCurrent(payload),
       ).resolves.toBeUndefined();
+      expect(mockRefreshTokenService.findActiveSession).toHaveBeenCalledWith(
+        'u1',
+        'family-1',
+      );
+    });
+
+    it('checks the session with ONE lookup (family and tokenVersion together)', async () => {
+      mockRefreshTokenService.findActiveSession.mockResolvedValue({
+        tokenVersion: 2,
+      });
+
+      await service.assertSessionCurrent(payload);
+
+      expect(mockRefreshTokenService.findActiveSession).toHaveBeenCalledTimes(
+        1,
+      );
     });
 
     it.each([
-      [
-        'tokenVersion diverso',
-        { id: 'u1', tokenVersion: 1 },
-        { tokenVersion: 2 },
-      ],
-      ['utente cancellato', { id: 'u1', tokenVersion: 0 }, null],
-      [
-        'token senza tokenVersion (emesso prima della modifica)',
-        { id: 'u1' },
-        { tokenVersion: 0 },
-      ],
-    ])('rejects: %s', async (_label, payload, state) => {
-      mockUserService.getAuthState.mockResolvedValue(state);
+      ['family revoked, expired or missing (or user deleted)', null],
+      ['different tokenVersion', { tokenVersion: 3 }],
+    ])('rejects: %s', async (_label, session) => {
+      mockRefreshTokenService.findActiveSession.mockResolvedValue(session);
+
       await expect(
         service.assertSessionCurrent(payload),
       ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
-    it('rejects a payload without id without touching the database', async () => {
-      await expect(service.assertSessionCurrent({})).rejects.toBeInstanceOf(
-        UnauthorizedException,
-      );
-      expect(mockUserService.getAuthState).not.toHaveBeenCalled();
+    it('rejects a token without tokenVersion (issued before the revocation checks)', async () => {
+      mockRefreshTokenService.findActiveSession.mockResolvedValue({
+        tokenVersion: 0,
+      });
+
+      await expect(
+        service.assertSessionCurrent({ id: 'u1', fid: 'family-1' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
     });
+
+    it.each([
+      [
+        'without fid (issued before this change)',
+        { id: 'u1', tokenVersion: 2 },
+      ],
+      ['without id', { tokenVersion: 2, fid: 'family-1' }],
+      ['empty', {}],
+    ])(
+      'rejects a payload %s without touching the database',
+      async (_label, p) => {
+        await expect(service.assertSessionCurrent(p)).rejects.toBeInstanceOf(
+          UnauthorizedException,
+        );
+        expect(
+          mockRefreshTokenService.findActiveSession,
+        ).not.toHaveBeenCalled();
+      },
+    );
   });
 
   // =========================================================================
-  // refreshTokens (rotazione + reuse detection)
+  // refreshTokens (rotation + reuse detection)
   // =========================================================================
 
   describe('refreshTokens', () => {
@@ -396,10 +436,22 @@ describe('AuthService', () => {
       const result = await service.refreshTokens('old.refresh.token');
 
       expect(result).toEqual({ token: 'new.token', refreshToken: 'new.token' });
-      expect(mockRefreshTokenService.rotate).toHaveBeenCalledWith('jti-1');
+      expect(mockRefreshTokenService.rotate).toHaveBeenCalledWith('jti-1', 10);
       expect(mockRefreshTokenService.create).toHaveBeenCalledWith(
         expect.objectContaining({ familyId: 'family-1', userId: 'uuid-1234' }),
       );
+    });
+
+    it('puts the SAME family in the new access token and in the new refresh token', async () => {
+      mockUserService.getUserById.mockResolvedValue(buildUser());
+
+      await service.refreshTokens('old.refresh.token');
+
+      const payloads = mockJwtService.signAsync.mock.calls.map(
+        (c) => c[0] as { fid: string },
+      );
+      expect(payloads).toHaveLength(2);
+      expect(payloads.map((p) => p.fid)).toEqual(['family-1', 'family-1']);
     });
 
     it('signs the new tokens from the freshly loaded user, not the stale decoded payload', async () => {
@@ -420,7 +472,8 @@ describe('AuthService', () => {
     it('rejects a token that was already used (reuse): revokes the family AND invalidates the sessions', async () => {
       mockRefreshTokenService.rotate.mockResolvedValue({
         status: 'reused',
-        token: storedToken({ usedAt: new Date(Date.now() - 60_000) }),
+        token: storedToken(),
+        withinGrace: false,
       });
 
       await expect(
@@ -435,10 +488,11 @@ describe('AuthService', () => {
       expect(mockRefreshTokenService.create).not.toHaveBeenCalled();
     });
 
-    it('a reuse right after the rotation is only rejected: the family stays valid (parallel requests)', async () => {
+    it('a reuse inside the grace period (by the database clock) is only rejected: the family stays valid', async () => {
       mockRefreshTokenService.rotate.mockResolvedValue({
         status: 'reused',
-        token: storedToken({ usedAt: new Date(Date.now() - 2_000) }),
+        token: storedToken(),
+        withinGrace: true,
       });
 
       await expect(
@@ -463,9 +517,9 @@ describe('AuthService', () => {
     );
 
     it.each([
-      ['senza jti', { ...decoded, jti: undefined }],
-      ['senza fid', { ...decoded, fid: undefined }],
-      ['senza id', { ...decoded, id: undefined }],
+      ['no jti', { ...decoded, jti: undefined }],
+      ['no fid', { ...decoded, fid: undefined }],
+      ['no id', { ...decoded, id: undefined }],
     ])(
       'rejects a legacy/forged refresh token %s before hitting the store',
       async (_label, payload) => {
@@ -624,6 +678,6 @@ describe('AuthService', () => {
     });
   });
 
-  // register/login (risposta uniforme, blocco per account, bcrypt, re-hash) sono in
+  // register/login (uniform response, per-account lock, bcrypt, re-hash) are in
   // auth.service.credentials.spec.ts.
 });

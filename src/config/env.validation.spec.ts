@@ -11,12 +11,13 @@ const validate = (
 ): { value: Record<string, unknown>; error?: Error } =>
   envValidationSchema.validate({ ...BASE, ...env }, { allowUnknown: true });
 
-describe('validazione ambiente', () => {
-  it('in produzione rifiuta i segreti segnaposto di .env.sample', () => {
+describe('environment validation', () => {
+  it('in production rejects the placeholder secrets from .env.sample', () => {
     const production = {
       NODE_ENV: 'production',
       SMTP_HOST: 'smtp.example.com',
       FRONTEND_URL: 'https://app.example.com',
+      CORS_ORIGIN: 'https://app.example.com',
     };
     expect(
       validate({
@@ -27,12 +28,12 @@ describe('validazione ambiente', () => {
     expect(validate(production).error).toBeUndefined();
   });
 
-  it('rifiuta lo stesso segreto per access e refresh token', () => {
+  it('rejects the same secret for access and refresh tokens', () => {
     const { error } = validate({ REFRESH_TOKEN_SECRET: BASE.JWT_SECRET });
     expect(error?.message).toMatch(/must be different/);
   });
 
-  it('applica i default sicuri', () => {
+  it('applies the safe defaults', () => {
     const { value, error } = validate({});
     expect(error).toBeUndefined();
     expect(value).toMatchObject({
@@ -51,17 +52,18 @@ describe('validazione ambiente', () => {
   });
 
   describe('BCRYPT_ROUNDS (D6)', () => {
-    it.each([4, 10, 12, 15])('accetta %i', (rounds) => {
+    it.each([4, 10, 12, 15])('accepts %i', (rounds) => {
       expect(validate({ BCRYPT_ROUNDS: rounds }).error).toBeUndefined();
     });
-    it.each([3, 16, 'abc', 1.5])('rifiuta %j', (rounds) => {
+    it.each([3, 16, 'abc', 1.5])('rejects %j', (rounds) => {
       expect(validate({ BCRYPT_ROUNDS: rounds }).error).toBeDefined();
     });
-    it('in produzione non scende sotto 10', () => {
+    it('in production does not go below 10', () => {
       const prod = {
         NODE_ENV: 'production',
         SMTP_HOST: 'smtp.example.com',
         FRONTEND_URL: 'https://app.example.com',
+        CORS_ORIGIN: 'https://app.example.com',
       };
       expect(validate({ ...prod, BCRYPT_ROUNDS: 8 }).error?.message).toMatch(
         /at least 10/,
@@ -71,7 +73,7 @@ describe('validazione ambiente', () => {
   });
 
   describe('FRONTEND_URL (C1)', () => {
-    it('accetta una whitelist di origini', () => {
+    it('accepts a whitelist of origins', () => {
       expect(
         validate({
           FRONTEND_URL: 'https://a.example.com,https://b.example.com',
@@ -83,11 +85,15 @@ describe('validazione ambiente', () => {
       'https://a.example.com/path',
       'not a url',
       'https://u:p@a.example.com',
-    ])('rifiuta %j', (url) => {
+    ])('rejects %j', (url) => {
       expect(validate({ FRONTEND_URL: url }).error).toBeDefined();
     });
-    it('in produzione richiede https', () => {
-      const prod = { NODE_ENV: 'production', SMTP_HOST: 'smtp.example.com' };
+    it('in production requires https', () => {
+      const prod = {
+        NODE_ENV: 'production',
+        SMTP_HOST: 'smtp.example.com',
+        CORS_ORIGIN: 'https://app.example.com',
+      };
       expect(
         validate({ ...prod, FRONTEND_URL: 'http://app.example.com' }).error
           ?.message,
@@ -96,43 +102,143 @@ describe('validazione ambiente', () => {
         validate({ ...prod, FRONTEND_URL: 'https://app.example.com' }).error,
       ).toBeUndefined();
     });
-    it('in produzione non si puo usare il default (localhost in http)', () => {
+    it('in production the default (localhost over http) cannot be used', () => {
       expect(
-        validate({ NODE_ENV: 'production', SMTP_HOST: 'smtp.example.com' })
+        validate({
+          NODE_ENV: 'production',
+          SMTP_HOST: 'smtp.example.com',
+          CORS_ORIGIN: 'https://app.example.com',
+        }).error?.message,
+      ).toMatch(/FRONTEND_URL must use https/);
+    });
+  });
+
+  describe('CORS_ORIGIN', () => {
+    const prod = {
+      NODE_ENV: 'production',
+      SMTP_HOST: 'smtp.example.com',
+      FRONTEND_URL: 'https://app.example.com',
+    };
+
+    it('keeps the permissive default (*) outside production', () => {
+      const { value, error } = validate({});
+      expect(error).toBeUndefined();
+      expect(value.CORS_ORIGIN).toBe('*');
+    });
+
+    it('is required in production', () => {
+      expect(validate(prod).error?.message).toMatch(/CORS_ORIGIN/);
+    });
+
+    it.each(['*', 'https://app.example.com,*', ' * '])(
+      'is never %j in production',
+      (value) => {
+        expect(
+          validate({ ...prod, CORS_ORIGIN: value }).error?.message,
+        ).toMatch(/CORS_ORIGIN must list the https origin/);
+      },
+    );
+
+    it.each([
+      'http://app.example.com',
+      'https://app.example.com,http://admin.example.com',
+    ])('only accepts https origins in production: rejects %j', (value) => {
+      expect(validate({ ...prod, CORS_ORIGIN: value }).error?.message).toMatch(
+        /CORS_ORIGIN must use https/,
+      );
+    });
+
+    it.each([
+      'https://app.example.com/path',
+      'https://u:p@app.example.com',
+      'not a url',
+    ])('rejects a malformed origin in production: %j', (value) => {
+      expect(validate({ ...prod, CORS_ORIGIN: value }).error?.message).toMatch(
+        /CORS_ORIGIN/,
+      );
+    });
+
+    it('accepts one or more https origins in production', () => {
+      expect(
+        validate({ ...prod, CORS_ORIGIN: 'https://app.example.com' }).error,
+      ).toBeUndefined();
+      expect(
+        validate({
+          ...prod,
+          CORS_ORIGIN: 'https://app.example.com, https://admin.example.com',
+        }).error,
+      ).toBeUndefined();
+    });
+
+    it('is not checked outside production (any value, including http)', () => {
+      expect(
+        validate({ CORS_ORIGIN: 'http://localhost:3000,http://localhost:4000' })
           .error,
-      ).toBeDefined();
+      ).toBeUndefined();
+    });
+  });
+
+  describe('SWAGGER_ENABLED', () => {
+    it('is off by default', () => {
+      expect(validate({}).value.SWAGGER_ENABLED).toBe(false);
+    });
+    it.each([
+      ['true', true],
+      ['false', false],
+    ])('reads %j', (raw, expected) => {
+      expect(validate({ SWAGGER_ENABLED: raw }).value.SWAGGER_ENABLED).toBe(
+        expected,
+      );
+    });
+    it('rejects anything that is not a boolean', () => {
+      expect(validate({ SWAGGER_ENABLED: 'maybe' }).error).toBeDefined();
+    });
+  });
+
+  describe('TRUST_PROXY', () => {
+    it('defaults to 1 hop', () => {
+      expect(validate({}).value.TRUST_PROXY).toBe(1);
+    });
+    it.each([0, 1, 2, '3'])('accepts %j hops (0 = no proxy)', (hops) => {
+      expect(validate({ TRUST_PROXY: hops }).error).toBeUndefined();
+    });
+    it.each([-1, 1.5, 'yes', 'true'])('rejects %j', (hops) => {
+      expect(validate({ TRUST_PROXY: hops }).error).toBeDefined();
     });
   });
 
   describe('SMTP', () => {
-    it('SMTP_HOST e obbligatorio in produzione', () => {
+    it('SMTP_HOST is required in production', () => {
       const prod = {
         NODE_ENV: 'production',
         FRONTEND_URL: 'https://app.example.com',
+        CORS_ORIGIN: 'https://app.example.com',
       };
       expect(validate(prod).error).toBeDefined();
       expect(
         validate({ ...prod, SMTP_HOST: 'smtp.example.com' }).error,
       ).toBeUndefined();
     });
-    it('la porta deve essere valida', () => {
+    it('the port must be valid', () => {
       expect(validate({ SMTP_PORT: 70000 }).error).toBeDefined();
       expect(validate({ SMTP_PORT: 587 }).error).toBeUndefined();
     });
-    it('la durata del link di reset password ha un formato valido', () => {
+    it('the password reset link duration has a valid format', () => {
       expect(validate({ PASSWORD_RESET_TTL: '30m' }).error).toBeUndefined();
       expect(validate({ PASSWORD_RESET_TTL: 'presto' }).error).toBeDefined();
     });
-    it('la durata del link di verifica ha un formato valido', () => {
+    it('the verification link duration has a valid format', () => {
       expect(validate({ EMAIL_VERIFICATION_TTL: '2d' }).error).toBeUndefined();
-      expect(validate({ EMAIL_VERIFICATION_TTL: 'tanto' }).error).toBeDefined();
+      expect(
+        validate({ EMAIL_VERIFICATION_TTL: 'forever' }).error,
+      ).toBeDefined();
     });
   });
 
-  it('i segreti restano obbligatori e lunghi almeno 16 caratteri', () => {
+  it('secrets stay required and at least 16 characters long', () => {
     expect(
       envValidationSchema.validate(
-        { ...BASE, JWT_SECRET: 'corto' },
+        { ...BASE, JWT_SECRET: 'short' },
         { allowUnknown: true },
       ).error,
     ).toBeDefined();
@@ -144,7 +250,7 @@ describe('validazione ambiente', () => {
     ).toBeDefined();
   });
 
-  it('Google e opzionale (vuoto = disattivato)', () => {
+  it('Google is optional (empty = disabled)', () => {
     expect(
       validate({
         GOOGLE_CLIENT_ID: '',

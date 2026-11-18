@@ -133,7 +133,7 @@ yarn seed --email admin@example.com --permission ADMIN
 yarn seed --email admin@example.com --password MyPass! --permission ADMIN,MODERATOR
 ```
 
-> **Note:** If you rename the `USER` permission in the seeder, update `auth.controller.ts` accordingly.
+> **Note:** The `USER` permission is the one every new account gets and the app refuses to register anyone without it (`AuthService.register` in `auth.service.ts` asks `PermissionService.getRequired('USER')`; `PermissionService` re-creates it at every startup if it is missing). If you rename it in the seeder, change it in `auth.service.ts` and in the list of essential permissions in `permission.service.ts` too.
 
 ### 6. Start the server
 
@@ -145,7 +145,7 @@ yarn start:dev
 yarn build && yarn start:prod
 ```
 
-Swagger UI is available at `http://localhost:5000/docs`.
+Swagger UI is available at `http://localhost:5000/docs` everywhere except production, where it is **off** unless you set `SWAGGER_ENABLED=true`.
 
 ---
 
@@ -223,7 +223,7 @@ export class AuthController {}
 
 ### `@Permissions(...)`
 
-Restricts access based on user permissions. Supports AND/OR/wildcard logic.
+Restricts access based on user permissions. Supports AND/OR/wildcard logic. It can go on a method or on a whole controller class: a method-level decorator **replaces** the class-level one for that route (it is not merged with it), and a route with neither is open to any authenticated user.
 
 ```typescript
 // OR — requires EDIT or DELETE
@@ -241,9 +241,13 @@ Restricts access based on user permissions. Supports AND/OR/wildcard logic.
 
 > Permissions are case-insensitive. Users with `ADMIN` bypass all permission checks.
 
+**Wildcard semantics.** `*` is special only in the permission written in `@Permissions()` (the *required* one), where it matches any run of characters, including none: `MANAGE_*` is satisfied by `MANAGE_USERS` and by `MANAGE_`. The whole name has to match (`MANAGE_*` does not match `NOT_MANAGE_USERS`) and every other character is literal (`REPORT.*` does not match `REPORTX1`; a dot is a dot). A permission a user *holds* is never a pattern: someone who holds `MANAGE_*` has exactly that name and does not satisfy `MANAGE_USERS`. A lone `*` means "any permission at all": it is satisfied by holding at least one.
+
 ---
 
 ## Guards
+
+Global guards run in this order (the order of the `APP_GUARD` providers in `app.module.ts`): **`ThrottlerGuard` → `AuthGuard` → `PermissionsGuard`**. The rate limit is first so that requests the other two reject (no token, no permission) still count against it.
 
 ### `AuthGuard` (global)
 
@@ -253,14 +257,14 @@ Restricts access based on user permissions. Supports AND/OR/wildcard logic.
 
 ### `PermissionsGuard` (global)
 
-- Reads required permissions from the `@Permissions()` decorator.
+- Reads required permissions from the `@Permissions()` decorator, on the method or the class (method wins).
 - Queries the user's permissions from the database.
 - Returns `403 Forbidden` if the user lacks the required permissions.
 - `ADMIN` permission bypasses all checks.
 
 ### `ThrottlerGuard` (global)
 
-Rate limiting: 100 requests per 60 seconds per IP.
+Rate limiting: 100 requests per 60 seconds per IP. The counters live in the memory of each instance (see [Running more than one instance](#running-more-than-one-instance)).
 
 ---
 
@@ -272,12 +276,15 @@ Rate limiting: 100 requests per 60 seconds per IP.
 | Refresh token | `refresh_token` cookie | 7 days | `/api/auth` | Yes |
 | Trusted device | `trusted_device` cookie | 30 days | `/api/auth` | Yes |
 
-- **Rotation:** every refresh marks the old token as used and issues a new one in the same *family* (`refresh_tokens` table, only the hash of the `jti` is stored). Presenting an already-used token revokes the whole family and bumps `tokenVersion`.
-- **Instant revocation:** the access token carries `tokenVersion`, checked on every request (one primary-key lookup): logout-all, reuse detection and password reset invalidate it immediately. A single-session `logout` revokes the refresh token; the access token of that session lives until it expires (≤ `JWT_EXPIRATION`).
+- **Rotation:** every refresh marks the old token as used and issues a new one in the same *family* (`refresh_tokens` table, only the hash of the `jti` is stored). Presenting an already-used token **after the grace period** revokes the whole family and bumps `tokenVersion`.
+- **Idempotent refresh:** when the access token expires, a page often fires several requests at once, all carrying the same refresh cookie. Inside the grace period (`REFRESH_REUSE_GRACE_SECONDS`) a second use of the same refresh token gets the **same pair of tokens** the first rotation issued (kept in memory, per `jti`, for the length of the grace period and then dropped), so all those requests succeed instead of all but one getting a 401. Whether a use is inside or outside the grace period is decided in SQL with the database clock, not the application's. Logout, logout-all, password reset and a detected replay drop the cached pairs of the sessions they revoke. Limits: the cache is per instance, so with several instances a request that lands on another one is only rejected (never treated as theft inside the grace period); and inside the grace period whoever holds the refresh token gets the pair, so keep the grace short (`0` turns the whole thing off: every second use is theft).
+- **Instant revocation:** the access token carries `tokenVersion` and `fid`, the id of the session family it belongs to (the same `fid` as the refresh token of that device). On every request one indexed query checks that the family belongs to the user and is neither revoked nor expired, and that `tokenVersion` still matches. So `logout` (this device only), logout-all, reuse detection and password reset kill the access token immediately, even if someone copied it; the user's other devices keep working after a plain `logout`. After a refresh the old refresh tokens are only marked as used, not revoked, so the session (and the access tokens of that family) stay valid between rotations.
+- **Cost:** one query per authenticated request, the same count as before (it replaced the lookup of the user by primary key). There is deliberately **no in-memory cache** of the session state: with more than one instance a logout could not be invalidated everywhere, and a revoked token would keep working for as long as the cache TTL.
+- **Deploying this change:** access tokens issued before it have no `fid` and are rejected with 401. The browser keeps its `refresh_token` cookie, so `POST /api/auth/refresh` (or `GET /api/auth/validate`) hands out a new pair; clients that only hold a Bearer access token must refresh or log in again. Nobody is logged out for good: refresh tokens are unchanged.
 - **Refresh cookie path:** because it is only sent to `/api/auth/*`, clients renew with `POST /api/auth/refresh` (or `GET /api/auth/validate`), not through other routes. If a proxy changes the public path, rewrite the cookie path (`proxy_cookie_path /api/auth <public path>/auth;`).
 - `trusted_device` only lets the account owner log in (still with the right password) while the account is temporarily locked by someone else's failed attempts; it never skips the password check and is tied to the account and its `tokenVersion`.
 - Known limit: whoever knows an email can keep that account locked for new devices (up to `LOGIN_LOCK_MAX_SECONDS`) by sending wrong passwords; known devices, the password reset and the per-IP limit on `/auth/login` (5 per minute) soften it. A CAPTCHA would be the next step.
-- Cookies get the `secure` flag automatically when `NODE_ENV=production`. Expired tokens are cleaned up daily.
+- Cookies get the `secure` flag automatically when `NODE_ENV=production`. Expired tokens and stale login attempt counters are cleaned up **every hour** (the counters are written for any email, existing or not, so they must not pile up).
 
 ---
 
@@ -292,12 +299,50 @@ See [`.env.sample`](.env.sample) for every variable. The ones introduced with th
 | `EMAIL_VERIFICATION_TTL` / `PASSWORD_RESET_TTL` | `24h` / `1h` | Lifetime of the emailed links |
 | `BCRYPT_ROUNDS` | `12` | bcrypt cost (≥ 10 in production) |
 | `LOGIN_MAX_FAILED_ATTEMPTS`, `LOGIN_LOCK_BASE_SECONDS`, `LOGIN_LOCK_MAX_SECONDS`, `LOGIN_ATTEMPT_WINDOW_SECONDS` | `5`, `60`, `900`, `1800` | Progressive per-account lockout |
-| `REFRESH_REUSE_GRACE_SECONDS` | `10` | A refresh token used twice within this many seconds is just rejected (parallel requests); later, it counts as theft and revokes the session family. `0` = always theft |
+| `REFRESH_REUSE_GRACE_SECONDS` | `10` | A refresh token used twice within this many seconds gets the same pair of tokens as the first use (parallel requests; same instance only, see [Idempotent refresh](#token-strategy)); later, it counts as theft and revokes the session family. `0` = always theft |
+| `CORS_ORIGIN` | `*` (development only) | Origins allowed by CORS, comma-separated. **Required in production**: https origins only, never `*` (the app refuses to start otherwise) |
+| `SWAGGER_ENABLED` | `false` | Swagger UI at `/docs`. Always on outside production; in production only with `SWAGGER_ENABLED=true` |
+| `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app whose `X-Forwarded-For` is trusted. **Set `0` when nothing sits in front** (otherwise anyone can fake their IP and sidestep the rate limits) |
 | `DB_MIGRATIONS_RUN` | `false` | Apply migrations at startup |
 
 Without `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_CALLBACK_URL` the Google provider is **disabled** and its endpoints answer `501`.
 
 ---
+
+## Production notes
+
+### Frontend and API on the same site
+
+The auth cookies are `SameSite=Lax`: the browser only sends them with requests made from the **same site** as the API. Serve the frontend and the API from the same registrable domain (`app.example.com` + `api.example.com`, or one domain with `/api` behind the proxy). A frontend on a different site (`app.example.com` calling `api.other.net`) will not send the cookies and every call will look logged out; there is no setting that fixes that without weakening the cookies. Set `CORS_ORIGIN` to the frontend's origin and call the API with `credentials: 'include'`.
+
+### Running the migrations (staging and production)
+
+`synchronize` is off, so the schema only exists once the migrations have run. Two ways:
+
+| | How | When |
+|---|---|---|
+| **Deploy step (recommended)** | `yarn migration:run` against the target database (`DATABASE_URL`), before starting the new version. It uses the TypeScript sources and the dev dependencies, so run it from the repository checkout or the CI job, not from a production-only image. `yarn migration:show` lists what is pending | Staging, production, and anything with more than one instance |
+| **At startup** | `DB_MIGRATIONS_RUN=true`: the app applies the pending (compiled) migrations when it boots | A single instance, where one process boots at a time. With several instances booting together they would race to apply the same migration |
+
+Back up the production database before the first run: `NormalizeEmails` renames duplicate accounts, and `migration:revert` is there for emergencies, not for routine use.
+
+### Email delivery and shutdown
+
+Verification, password reset and "address already registered" emails are sent **in the background**, after the HTTP response (so response times do not reveal whether an address has an account). A send is attempted up to 3 times (waiting 2 s, then 10 s) on network errors and SMTP 4xx answers. There is **no persistent queue**: an email that still fails after the retries, or that is in flight when the process is killed, is **lost**. The user can ask again (resend verification, forgot password), and a failed send is logged.
+
+On `SIGTERM`/`SIGINT` the app waits up to 20 seconds for the emails already queued before exiting (`AccountService.onApplicationShutdown`); give your orchestrator a termination grace period longer than that (Kubernetes' default of 30 s is fine). If you need delivery guarantees across crashes and deploys, put a durable queue (a table, Redis, a managed service) behind `MailService`.
+
+### Request ids in the logs
+
+Every response carries an `X-Request-Id` header. A client may send its own, but it is accepted only if it matches `^[A-Za-z0-9-]{1,64}$` (it ends up in log lines and a response header, so no spaces, new lines or long strings); anything else is replaced by a fresh UUID. The id is part of every error log line (`GET /api/user/me → 401 [request <id>]`), including the 401/403 that a guard raises before the request reaches a controller.
+
+### Running more than one instance
+
+A few things live in the memory of each process and are **not shared** between instances:
+
+- **Rate limiting** (`ThrottlerGuard`): every instance counts on its own, so the effective limit is up to *N* times higher with *N* instances. Per-account login lockout is stored in the database and is shared.
+- **Scheduled cleanup** (hourly): every instance runs it. The deletes are idempotent, so this is harmless, just redundant.
+- **Idempotent refresh**: the cached pair of tokens is per instance. A parallel request that lands on a different instance than the one that rotated is rejected (not treated as theft). Sticky routing by client avoids it.
 
 ## Running Tests
 
@@ -354,7 +399,7 @@ yarn migration:show
 
 ## Reverse Proxy
 
-The app is meant to run behind a reverse proxy (nginx, Caddy, Traefik...) that terminates TLS. It already trusts the first proxy hop (`app.set('trust proxy', 1)` in `main.ts`), so `req.ip` and the `ThrottlerGuard`'s per-IP rate limiting still work correctly instead of bucketing every client under the proxy's IP.
+The app is meant to run behind a reverse proxy (nginx, Caddy, Traefik...) that terminates TLS. It trusts the number of proxy hops given by `TRUST_PROXY` (default `1`), so `req.ip` and the `ThrottlerGuard`'s per-IP rate limiting still work correctly instead of bucketing every client under the proxy's IP. **If nothing sits in front of the app, set `TRUST_PROXY=0`**: with a trusted hop and no proxy, anyone can send their own `X-Forwarded-For` and get a fresh rate-limit bucket on every request. With two proxies in a row (e.g. a CDN and nginx) set `2`.
 
 Both examples below forward the request path unchanged (no rewriting) — since the app already expects everything under `/api` (see [API Endpoints](#api-endpoints)), that's the config with the least room for surprises. This means on the dedicated subdomain the path still includes `/api`, e.g. `api.example.com/api/auth/login`, not `api.example.com/auth/login`. You can run either setup alone or both at once against the same backend.
 
@@ -443,7 +488,7 @@ example.com {
 
 `/health` and `/docs` sit outside the `/api` prefix (see [API Endpoints](#api-endpoints)), so on the path-based setup they need their own `location`/`handle` block to be reachable from the main domain — otherwise they're only reachable through the dedicated subdomain.
 
-Set `NODE_ENV=production` so the auth cookies get the `secure` flag, and set `CORS_ORIGIN` to the exact origin(s) serving the frontend — `credentials: true` cookies don't work with a wildcard origin.
+Set `NODE_ENV=production` so the auth cookies get the `secure` flag, and set `CORS_ORIGIN` to the exact https origin(s) serving the frontend — `credentials: true` cookies don't work with a wildcard origin, so in production the app refuses to start with `CORS_ORIGIN` missing, `*` or on http.
 
 </details>
 

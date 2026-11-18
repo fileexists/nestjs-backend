@@ -455,7 +455,7 @@ describe('AuthController (e2e)', () => {
         .expect(401);
       const body = response.body as ApiResponseBody;
 
-      // Niente piu' "Please login via google.": stessa risposta di password errata/utente inesistente.
+      // No more "Please login via google.": same response as wrong password/non-existent user.
       expect(body.message).toBe('Invalid email or password');
     });
 
@@ -499,6 +499,7 @@ describe('AuthController (e2e)', () => {
         id: LOCAL_USER.id,
         email: LOCAL_USER.email,
         tokenVersion: LOCAL_USER.tokenVersion,
+        fid: 'family-e2e',
         permissions: LOCAL_USER.permissions,
       });
 

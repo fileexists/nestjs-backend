@@ -20,10 +20,16 @@ describe('GoogleCallbackExceptionFilter (C1)', () => {
       redirect: jest.fn(),
       status: jest.fn().mockReturnThis(),
       json: jest.fn(),
+      setHeader: jest.fn(),
     };
     const argumentsHost = {
       switchToHttp: () => ({
-        getRequest: () => ({ method: 'GET', url: '/x', ...request }),
+        getRequest: () => ({
+          method: 'GET',
+          url: '/x',
+          headers: {},
+          ...request,
+        }),
         getResponse: () => response,
       }),
     } as unknown as ArgumentsHost;
@@ -48,7 +54,7 @@ describe('GoogleCallbackExceptionFilter (C1)', () => {
     },
   );
 
-  it('un 401 generico (es. consenso negato) -> reason=failed', () => {
+  it('a generic 401 (e.g. consent denied) -> reason=failed', () => {
     const { argumentsHost, response } = host();
     filter.catch(new UnauthorizedException(), argumentsHost);
     expect(response.redirect).toHaveBeenCalledWith(
@@ -57,7 +63,7 @@ describe('GoogleCallbackExceptionFilter (C1)', () => {
     );
   });
 
-  it('usa l origine scelta all avvio (indice firmato) anche per gli errori', () => {
+  it('uses the origin chosen at the start (signed index) for errors too', () => {
     const { argumentsHost, response } = host({ oauthRedirectIndex: 1 });
     filter.catch(new GoogleAuthException('failed', 'x'), argumentsHost);
     expect(response.redirect).toHaveBeenCalledWith(
@@ -66,7 +72,7 @@ describe('GoogleCallbackExceptionFilter (C1)', () => {
     );
   });
 
-  it('un errore inatteso (non HTTP) riporta comunque al frontend con reason=server_error', () => {
+  it('an unexpected (non-HTTP) error still goes back to the frontend with reason=server_error', () => {
     const { argumentsHost, response } = host();
     filter.catch(new Error('db exploded'), argumentsHost);
     expect(response.redirect).toHaveBeenCalledWith(
@@ -76,10 +82,10 @@ describe('GoogleCallbackExceptionFilter (C1)', () => {
   });
 
   it.each([
-    ['501 provider non configurato', new NotImplementedException('x'), 501],
+    ['501 provider not configured', new NotImplementedException('x'), 501],
     ['400', new BadRequestException('x'), 400],
-    ['500 HTTP esplicito', new InternalServerErrorException('x'), 500],
-  ])('%s resta una risposta JSON, non un redirect', (_label, error, status) => {
+    ['explicit HTTP 500', new InternalServerErrorException('x'), 500],
+  ])('%s stays a JSON response, not a redirect', (_label, error, status) => {
     const { argumentsHost, response } = host();
     filter.catch(error, argumentsHost);
     expect(response.redirect).not.toHaveBeenCalled();

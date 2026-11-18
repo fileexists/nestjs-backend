@@ -1,7 +1,7 @@
 /**
- * D1/D2/D4/D5/D6 - registrazione e login (unit): risposta uniforme, bcrypt fittizio,
- * blocco per account, dispositivo riconosciuto, corse di registrazione, costo e re-hash.
- * Il comportamento sul database vero e' in test/db/d*.e2e-spec.ts.
+ * D1/D2/D4/D5/D6 - registration and login (unit): uniform response, dummy bcrypt,
+ * per-account lock, recognized device, registration races, cost and re-hash.
+ * The behaviour on the real database is in test/db/d*.e2e-spec.ts.
  */
 import {
   ConflictException,
@@ -23,6 +23,7 @@ import {
   extraAuthProviders,
   mockAccountService,
   mockLoginAttemptService,
+  mockRefreshTokenService,
   resetAuthMocks,
 } from './testing/auth-mocks';
 import { createTrustedDeviceCookie } from './trusted-device';
@@ -83,7 +84,7 @@ function buildResponse() {
 const asResponse = (res: ReturnType<typeof buildResponse>) =>
   res as unknown as Response;
 
-describe('AuthService - credenziali', () => {
+describe('AuthService - credentials', () => {
   let service: AuthService;
   let hash: string;
   const config: Record<string, unknown> = {
@@ -129,7 +130,7 @@ describe('AuthService - credenziali', () => {
     service = await build();
   });
 
-  describe('login - nessuna enumerazione (D1)', () => {
+  describe('login - no enumeration (D1)', () => {
     const credentials = {
       email: 'mario@example.com',
       password: 'Wrong-Passw0rd!',
@@ -137,7 +138,7 @@ describe('AuthService - credenziali', () => {
     const messageOf = async (promise: Promise<unknown>) =>
       (await promise.catch((e: unknown) => e)) as UnauthorizedException;
 
-    it('utente inesistente: confronta comunque con un hash bcrypt valido e risponde come per la password errata', async () => {
+    it('nonexistent user: still compares against a valid bcrypt hash and answers as for a wrong password', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
 
       const error = await messageOf(
@@ -148,10 +149,10 @@ describe('AuthService - credenziali', () => {
       expect(error.message).toBe('Invalid email or password');
       expect(bcryptCompare).toHaveBeenCalledTimes(1);
       const [, comparedHash] = bcryptCompare.mock.calls[0] as [string, string];
-      expect(comparedHash).toMatch(/^\$2[aby]\$04\$/); // hash vero, stesso costo configurato
+      expect(comparedHash).toMatch(/^\$2[aby]\$04\$/); // real hash, same configured cost
     });
 
-    it('password errata, utente inesistente e account solo-Google: stesso status e stesso messaggio', async () => {
+    it('wrong password, nonexistent user and Google-only account: same status and same message', async () => {
       const outcomes: UnauthorizedException[] = [];
       for (const user of [
         null,
@@ -175,7 +176,7 @@ describe('AuthService - credenziali', () => {
       expect(outcomes.map((e) => e.message).join()).not.toMatch(/google/i);
     });
 
-    it('anche senza password nel corpo si esegue un confronto bcrypt', async () => {
+    it('even without a password in the body a bcrypt comparison is made', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: hash }),
       );
@@ -189,24 +190,24 @@ describe('AuthService - credenziali', () => {
       expect(bcryptCompare).toHaveBeenCalledTimes(1);
     });
 
-    describe('hash con costo inferiore a BCRYPT_ROUNDS (account precedenti)', () => {
+    describe('hash with a cost lower than BCRYPT_ROUNDS (earlier accounts)', () => {
       const wrong = { email: 'mario@example.com', password: 'Wrong-Passw0rd' };
 
-      it('si pareggia il lavoro con confronti fittizi: i tempi non rivelano che l account esiste', async () => {
+      it('the work is evened out with dummy comparisons: timings do not reveal that the account exists', async () => {
         const stronger = await build({ BCRYPT_ROUNDS: 6 });
         userService.getUserByEmail.mockResolvedValue(
-          buildUser({ password: hash }), // costo 4: 4 volte piu' veloce di un hash a 6
+          buildUser({ password: hash }), // cost 4: 4 times faster than a cost 6 hash
         );
 
         await expect(
           stronger.login(wrong, asResponse(buildResponse())),
         ).rejects.toBeInstanceOf(UnauthorizedException);
 
-        // 1 confronto vero + (2^(6-4) - 1) fittizi = lavoro pari a un hash a costo 6
+        // 1 real compare + (2^(6-4) - 1) dummy ones = same work as a cost 6 hash
         expect(bcryptCompare).toHaveBeenCalledTimes(4);
       });
 
-      it('con costo uguale o superiore resta un solo confronto', async () => {
+      it('with an equal or higher cost there is just one comparison', async () => {
         const looser = await build({ BCRYPT_ROUNDS: 4 });
         userService.getUserByEmail.mockResolvedValue(
           buildUser({ password: hash }),
@@ -219,7 +220,7 @@ describe('AuthService - credenziali', () => {
         expect(bcryptCompare).toHaveBeenCalledTimes(1);
       });
 
-      it('un hash non valido nel database non fa esplodere il login', async () => {
+      it('an invalid hash in the database does not blow up the login', async () => {
         userService.getUserByEmail.mockResolvedValue(
           buildUser({ password: 'not-a-bcrypt-hash' }),
         );
@@ -230,7 +231,7 @@ describe('AuthService - credenziali', () => {
       });
     });
 
-    it("l'hash fittizio si calcola una sola volta e si riusa", async () => {
+    it('the dummy hash is computed once and reused', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
 
       await service
@@ -244,7 +245,7 @@ describe('AuthService - credenziali', () => {
       expect(bcryptCompare).toHaveBeenCalledTimes(2);
     });
 
-    it('password corretta ma email non verificata: 403 (solo a chi conosce la password)', async () => {
+    it('correct password but unverified email: 403 (only to whoever knows the password)', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: hash, emailVerifiedAt: undefined }),
       );
@@ -258,15 +259,15 @@ describe('AuthService - credenziali', () => {
     });
   });
 
-  describe('login - blocco per account (D2)', () => {
+  describe('login - per-account lock (D2)', () => {
     const ok = { email: 'mario@example.com', password: 'Correct-Passw0rd' };
     const bad = { email: 'mario@example.com', password: 'Wrong-Passw0rd!' };
 
-    it('conta ogni tentativo PRIMA di controllare la password (anche per account inesistenti)', async () => {
+    it('counts every attempt BEFORE checking the password (also for nonexistent accounts)', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
       const order: string[] = [];
       mockLoginAttemptService.registerAttempt.mockImplementation(() => {
-        order.push('conteggio');
+        order.push('count');
         return Promise.resolve({ locked: false });
       });
       bcryptCompare.mockImplementationOnce(() => {
@@ -281,10 +282,10 @@ describe('AuthService - credenziali', () => {
       expect(mockLoginAttemptService.registerAttempt).toHaveBeenCalledWith(
         'mario@example.com',
       );
-      expect(order).toEqual(['conteggio', 'bcrypt']);
+      expect(order).toEqual(['count', 'bcrypt']);
     });
 
-    it('la password errata non registra un secondo errore: il tentativo e gia contato', async () => {
+    it('the wrong password does not record a second failure: the attempt is already counted', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: hash }),
       );
@@ -296,7 +297,7 @@ describe('AuthService - credenziali', () => {
       expect(mockLoginAttemptService.registerAttempt).toHaveBeenCalledTimes(1);
     });
 
-    it('con account bloccato risponde 429 SENZA valutare la password', async () => {
+    it('with the account locked answers 429 WITHOUT evaluating the password', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: hash }),
       );
@@ -313,7 +314,7 @@ describe('AuthService - credenziali', () => {
       expect(bcryptCompare).not.toHaveBeenCalled();
     });
 
-    it("il blocco vale anche per un'email inesistente (non rivela l'esistenza)", async () => {
+    it('the lock also applies to a nonexistent email (does not reveal existence)', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
       mockLoginAttemptService.registerAttempt.mockResolvedValue({
         locked: true,
@@ -325,7 +326,7 @@ describe('AuthService - credenziali', () => {
       expect((error as HttpException).getStatus()).toBe(429);
     });
 
-    it('un login riuscito azzera il contatore', async () => {
+    it('a successful login resets the counter', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: hash }),
       );
@@ -335,14 +336,14 @@ describe('AuthService - credenziali', () => {
       );
     });
 
-    describe('dispositivo riconosciuto', () => {
+    describe('recognized device', () => {
       const user = () => buildUser({ password: hash });
       const lock = () =>
         mockLoginAttemptService.registerAttempt.mockResolvedValue({
           locked: true,
         });
 
-      it('il proprietario con il cookie firmato entra anche durante il blocco', async () => {
+      it('the owner with the signed cookie gets in even during the lock', async () => {
         userService.getUserByEmail.mockResolvedValue(user());
         lock();
         const cookie = createTrustedDeviceCookie(JWT_SECRET, 'user-1', 0);
@@ -357,7 +358,7 @@ describe('AuthService - credenziali', () => {
         );
       });
 
-      it('ma la password va comunque verificata: errata -> 401', async () => {
+      it('but the password must still be verified: wrong -> 401', async () => {
         userService.getUserByEmail.mockResolvedValue(user());
         lock();
         const cookie = createTrustedDeviceCookie(JWT_SECRET, 'user-1', 0);
@@ -369,15 +370,15 @@ describe('AuthService - credenziali', () => {
 
       it.each([
         [
-          'cookie di un altro utente',
+          "another user's cookie",
           () => createTrustedDeviceCookie(JWT_SECRET, 'someone-else', 0),
         ],
         [
-          'tokenVersion cambiato (logout-all/reset)',
+          'tokenVersion changed (logout-all/reset)',
           () => createTrustedDeviceCookie(JWT_SECRET, 'user-1', 7),
         ],
         [
-          'firmato con un altro segreto',
+          'signed with another secret',
           () =>
             createTrustedDeviceCookie(
               'another-secret-0123456789abcdefghij',
@@ -386,7 +387,7 @@ describe('AuthService - credenziali', () => {
             ),
         ],
         [
-          'scaduto',
+          'expired',
           () =>
             createTrustedDeviceCookie(
               JWT_SECRET,
@@ -395,8 +396,8 @@ describe('AuthService - credenziali', () => {
               Date.now() - 400 * 86_400_000,
             ),
         ],
-        ['spazzatura', () => 'garbage'],
-      ])('%s: non sblocca (429)', async (_label, make) => {
+        ['garbage', () => 'garbage'],
+      ])('%s: does not unlock (429)', async (_label, make) => {
         userService.getUserByEmail.mockResolvedValue(user());
         lock();
 
@@ -406,7 +407,7 @@ describe('AuthService - credenziali', () => {
         expect((error as HttpException).getStatus()).toBe(429);
       });
 
-      it('al login riuscito imposta il cookie del dispositivo (httpOnly, limitato a /api/auth)', async () => {
+      it('on a successful login sets the device cookie (httpOnly, limited to /api/auth)', async () => {
         userService.getUserByEmail.mockResolvedValue(user());
         const res = buildResponse();
 
@@ -426,8 +427,8 @@ describe('AuthService - credenziali', () => {
     });
   });
 
-  describe('bcrypt: costo configurabile e re-hash (D6)', () => {
-    it('hashPassword usa BCRYPT_ROUNDS', async () => {
+  describe('bcrypt: configurable cost and re-hash (D6)', () => {
+    it('hashPassword uses BCRYPT_ROUNDS', async () => {
       const result = await service.hashPassword('x');
       expect(bcrypt.getRounds(result)).toBe(ROUNDS);
     });
@@ -437,10 +438,10 @@ describe('AuthService - credenziali', () => {
       expect(bcrypt.getRounds(await defaults.hashPassword('x'))).toBe(12);
     });
 
-    describe('re-hash trasparente al login', () => {
+    describe('transparent re-hash at login', () => {
       const ok = { email: 'mario@example.com', password: 'Correct-Passw0rd' };
 
-      it('rigenera un hash con costo inferiore e NON tocca tokenVersion', async () => {
+      it('regenerates a hash with a lower cost and does NOT touch tokenVersion', async () => {
         const legacy = await jest
           .requireActual<typeof import('bcrypt')>('bcrypt')
           .hash('Correct-Passw0rd', 4);
@@ -465,9 +466,9 @@ describe('AuthService - credenziali', () => {
       });
 
       it.each([
-        ['costo uguale', 4],
-        ['costo superiore', 3],
-      ])('non riscrive un hash con %s', async (_label, configured) => {
+        ['equal cost', 4],
+        ['higher cost', 3],
+      ])('does not rewrite a hash with %s', async (_label, configured) => {
         const current = await jest
           .requireActual<typeof import('bcrypt')>('bcrypt')
           .hash('Correct-Passw0rd', 4);
@@ -481,7 +482,7 @@ describe('AuthService - credenziali', () => {
         expect(userService.updateUser).not.toHaveBeenCalled();
       });
 
-      it('con password sbagliata non rigenera nulla', async () => {
+      it('with a wrong password regenerates nothing', async () => {
         const legacy = await jest
           .requireActual<typeof import('bcrypt')>('bcrypt')
           .hash('Correct-Passw0rd', 4);
@@ -500,7 +501,7 @@ describe('AuthService - credenziali', () => {
         expect(userService.updateUser).not.toHaveBeenCalled();
       });
 
-      it('se il re-hash fallisce il login riesce comunque', async () => {
+      it('if the re-hash fails the login still succeeds', async () => {
         const legacy = await jest
           .requireActual<typeof import('bcrypt')>('bcrypt')
           .hash('Correct-Passw0rd', 4);
@@ -522,10 +523,10 @@ describe('AuthService - credenziali', () => {
     });
   });
 
-  describe('register - risposta uniforme e corse (D1, D4, D5)', () => {
+  describe('register - uniform response and races (D1, D4, D5)', () => {
     const dto = { email: 'new@example.com', password: 'Correct-Passw0rd' };
 
-    it("email nuova: crea l'utente con il permesso USER e invia la verifica", async () => {
+    it('new email: creates the user with the USER permission and sends the verification', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
       const created = buildUser({ id: 'new-1', email: dto.email });
       userService.createUser.mockResolvedValue(created);
@@ -543,7 +544,7 @@ describe('AuthService - credenziali', () => {
       expect(mockAccountService.sendRegistrationNotice).not.toHaveBeenCalled();
     });
 
-    it('email gia registrata: stessa risposta, avviso al proprietario, NESSUNA modifica', async () => {
+    it('already registered email: same response, notice to the owner, NO change', async () => {
       const existing = buildUser({ password: hash });
       userService.getUserByEmail.mockResolvedValue(existing);
 
@@ -558,7 +559,7 @@ describe('AuthService - credenziali', () => {
       expect(mockAccountService.sendVerification).not.toHaveBeenCalled();
     });
 
-    it("l'hash bcrypt si calcola sempre, anche se l'email esiste (tempi uniformi)", async () => {
+    it('the bcrypt hash is always computed, even if the email exists (uniform timings)', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: hash }),
       );
@@ -566,7 +567,7 @@ describe('AuthService - credenziali', () => {
       expect(bcryptHash).toHaveBeenCalledTimes(1);
     });
 
-    it("chi perde la corsa (violazione di unicita) riceve la stessa risposta e il vincitore l'avviso, non un 500", async () => {
+    it('whoever loses the race (uniqueness violation) gets the same response and the winner gets the notice, not a 500', async () => {
       const winner = buildUser({ id: 'winner' });
       userService.getUserByEmail
         .mockResolvedValueOnce(null)
@@ -584,13 +585,13 @@ describe('AuthService - credenziali', () => {
       expect(mockAccountService.sendVerification).not.toHaveBeenCalled();
     });
 
-    it("un errore diverso dall'unicita viene propagato (non si nasconde un guasto)", async () => {
+    it('an error other than uniqueness is propagated (a failure is not hidden)', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
       userService.createUser.mockRejectedValue(new Error('connection lost'));
       await expect(service.register(dto)).rejects.toThrow('connection lost');
     });
 
-    it('senza permesso USER risponde 503 prima di fare altro: nessun utente, nessun hash, nessuna email', async () => {
+    it('without the USER permission answers 503 before doing anything else: no user, no hash, no email', async () => {
       permissionService.getRequired.mockRejectedValue(
         new ServiceUnavailableException('missing'),
       );
@@ -604,10 +605,66 @@ describe('AuthService - credenziali', () => {
     });
   });
 
-  describe('Google - corse e permesso mancante', () => {
+  describe('session: access and refresh token of the same family', () => {
+    const familiesSigned = () =>
+      (jwtService.signAsync.mock.calls as [{ fid: string }][]).map(
+        ([payload]) => payload.fid,
+      );
+
+    it('login: a new family, the same in both tokens and in the recorded refresh token', async () => {
+      userService.getUserByEmail.mockResolvedValue(
+        buildUser({ password: hash }),
+      );
+
+      await service.login(
+        { email: 'mario@example.com', password: 'Correct-Passw0rd' },
+        asResponse(buildResponse()),
+      );
+
+      const [access, refresh] = familiesSigned();
+      expect(access).toEqual(expect.any(String));
+      expect(refresh).toBe(access);
+      expect(mockRefreshTokenService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ familyId: access }),
+      );
+    });
+
+    it('two consecutive logins open two different families (one per device)', async () => {
+      userService.getUserByEmail.mockResolvedValue(
+        buildUser({ password: hash }),
+      );
+      const credentials = {
+        email: 'mario@example.com',
+        password: 'Correct-Passw0rd',
+      };
+
+      await service.login(credentials, asResponse(buildResponse()));
+      await service.login(credentials, asResponse(buildResponse()));
+
+      const [first, , second] = familiesSigned();
+      expect(first).not.toBe(second);
+    });
+
+    it('Google: same family in both tokens', async () => {
+      userService.getUserByGoogleId.mockResolvedValue(
+        buildUser({ googleId: 'g-1', provider: 'google' }),
+      );
+
+      await service.handleGoogleCallback(
+        { email: 'mario@example.com', googleId: 'g-1' },
+        asResponse(buildResponse()),
+      );
+
+      const [access, refresh] = familiesSigned();
+      expect(access).toEqual(expect.any(String));
+      expect(refresh).toBe(access);
+    });
+  });
+
+  describe('Google - races and missing permission', () => {
     const google = { email: 'g@example.com', googleId: 'g-1' };
 
-    it("due primi accessi contemporanei: chi perde la corsa prosegue con l'utente creato dall'altro", async () => {
+    it('two simultaneous first logins: whoever loses the race carries on with the user created by the other', async () => {
       userService.getUserByGoogleId
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(
@@ -628,7 +685,7 @@ describe('AuthService - credenziali', () => {
       );
     });
 
-    it('permesso USER mancante: 503 e nessun utente creato', async () => {
+    it('USER permission missing: 503 and no user created', async () => {
       userService.getUserByGoogleId.mockResolvedValue(null);
       userService.getUserByEmail.mockResolvedValue(null);
       permissionService.getRequired.mockRejectedValue(

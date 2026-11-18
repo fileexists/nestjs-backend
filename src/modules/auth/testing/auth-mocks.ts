@@ -6,9 +6,9 @@ import { LoginAttemptService } from '../login-attempt.service';
 import { MailService } from '../../mail/mail.service';
 
 /**
- * Mock condivisi dei collaboratori di AuthService per gli unit test.
- * Quando AuthService acquisisce una dipendenza nuova si aggiunge QUI, cosi' tutti
- * gli spec che costruiscono il modulo restano allineati.
+ * Shared mocks of AuthService's collaborators for the unit tests.
+ * When AuthService gets a new dependency it is added HERE, so that all
+ * the specs that build the module stay aligned.
  */
 export const mockAuthTokenService = {
   issue: jest.fn(),
@@ -21,6 +21,7 @@ export const mockAuthTokenService = {
 export const mockRefreshTokenService = {
   create: jest.fn(),
   rotate: jest.fn(),
+  findActiveSession: jest.fn(),
   revokeFamily: jest.fn(),
   revokeAllForUser: jest.fn(),
   deleteExpired: jest.fn(),

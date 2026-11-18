@@ -1,10 +1,10 @@
 import * as Joi from 'joi';
 import { DURATION_PATTERN } from '../common/utils/duration';
-import { parseFrontendUrls } from '../common/utils/frontend-url';
+import { parseFrontendUrls, parseOrigins } from '../common/utils/frontend-url';
 
 /**
- * Validazione delle variabili d'ambiente (usata da ConfigModule in AppModule).
- * Separata dal modulo per poterla testare in isolamento.
+ * Validation of the environment variables (used by ConfigModule in AppModule).
+ * Kept apart from the module so it can be tested in isolation.
  */
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
@@ -14,26 +14,36 @@ export const envValidationSchema = Joi.object({
   JWT_SECRET: Joi.string().min(16).required(),
   REFRESH_TOKEN_SECRET: Joi.string().min(16).required(),
   JWT_EXPIRATION: Joi.string().default('15m'),
-  // Costo bcrypt. In produzione almeno 10 (vedi controllo piu' sotto).
+  // bcrypt cost. At least 10 in production (see the check further down).
   BCRYPT_ROUNDS: Joi.number().integer().min(4).max(15).default(12),
-  // Blocco progressivo per account dopo tentativi di login falliti.
+  // Progressive per-account lock after failed login attempts.
   LOGIN_MAX_FAILED_ATTEMPTS: Joi.number().integer().min(1).default(5),
   LOGIN_LOCK_BASE_SECONDS: Joi.number().integer().min(1).default(60),
   LOGIN_LOCK_MAX_SECONDS: Joi.number().integer().min(1).default(900),
   LOGIN_ATTEMPT_WINDOW_SECONDS: Joi.number().integer().min(1).default(1800),
   REFRESH_TOKEN_EXPIRATION: Joi.string().default('7d'),
-  // Entro questi secondi dalla rotazione, un secondo uso dello stesso refresh token (due
-  // schede, richieste parallele) viene solo rifiutato; dopo, e' trattato come furto.
+  // Within this many seconds of the rotation, a second use of the same refresh token (two
+  // tabs, parallel requests) is only rejected; after that, it is treated as theft.
   REFRESH_REUSE_GRACE_SECONDS: Joi.number()
     .integer()
     .min(0)
     .max(60)
     .default(10),
   DATABASE_URL: Joi.string().required(),
-  // Applica le migrazioni all'avvio (default: no, si lanciano con `yarn migration:run`).
+  // Apply the migrations at startup (default: no, run them with `yarn migration:run`).
   DB_MIGRATIONS_RUN: Joi.boolean().default(false),
-  CORS_ORIGIN: Joi.string().default('*'),
-  // Email (SMTP). In sviluppo: Mailpit (localhost:1025, oppure mailpit:1025 dentro compose).
+  // Origins allowed by CORS (comma-separated). Development: `*` by default. Production: required,
+  // https origins only, never `*` (checked below).
+  CORS_ORIGIN: Joi.string().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.string().default('*'),
+  }),
+  // The API docs (/docs) are on outside production; in production only with SWAGGER_ENABLED=true.
+  SWAGGER_ENABLED: Joi.boolean().default(false),
+  // Proxies in front of the app whose X-Forwarded-For is trusted (number of hops). 0 = none.
+  TRUST_PROXY: Joi.number().integer().min(0).default(1),
+  // Email (SMTP). In development: Mailpit (localhost:1025, or mailpit:1025 inside compose).
   SMTP_HOST: Joi.string().when('NODE_ENV', {
     is: 'production',
     then: Joi.required(),
@@ -45,10 +55,10 @@ export const envValidationSchema = Joi.object({
   SMTP_PASS: Joi.string().optional().allow(''),
   MAIL_FROM: Joi.string().default('Auth <no-reply@localhost>'),
   EMAIL_VERIFICATION_TTL: Joi.string().pattern(DURATION_PATTERN).default('24h'),
-  // Durata del link di reset password.
+  // How long the password reset link lasts.
   PASSWORD_RESET_TTL: Joi.string().pattern(DURATION_PATTERN).default('1h'),
-  // Whitelist (separata da virgole) delle origini del frontend: link nelle
-  // email e redirect si costruiscono SOLO da qui. La prima e' quella predefinita.
+  // Whitelist (comma-separated) of the frontend origins: links in
+  // emails and redirects are built ONLY from here. The first one is the default.
   FRONTEND_URL: Joi.string()
     .custom((value: string) => {
       parseFrontendUrls(value);
@@ -62,24 +72,33 @@ export const envValidationSchema = Joi.object({
   (env: {
     NODE_ENV?: string;
     FRONTEND_URL?: string;
+    CORS_ORIGIN?: string;
     BCRYPT_ROUNDS?: number;
     JWT_SECRET?: string;
     REFRESH_TOKEN_SECRET?: string;
   }) => {
-    // Con lo stesso segreto un refresh token (7 giorni) varrebbe come access token.
+    // With the same secret a refresh token (7 days) would work as an access token.
     if (env.JWT_SECRET === env.REFRESH_TOKEN_SECRET) {
       throw new Error('JWT_SECRET and REFRESH_TOKEN_SECRET must be different');
     }
     if (env.NODE_ENV === 'production') {
-      // I segnaposto di .env.sample non sono segreti.
+      // The placeholders in .env.sample are not secrets.
       for (const secret of [env.JWT_SECRET, env.REFRESH_TOKEN_SECRET]) {
         if (/change-me/i.test(secret ?? '')) {
           throw new Error('Replace the placeholder secrets from .env.sample');
         }
       }
-      // In produzione il frontend e' sempre esplicito e solo https...
+      // In production the frontend is always explicit and https only...
       parseFrontendUrls(env.FRONTEND_URL ?? '', { requireHttps: true });
-      // ...e il costo bcrypt non puo' essere abbassato sotto 10.
+      // ...and so is CORS: explicit https origins, never `*` (cookies travel with the requests).
+      const cors = env.CORS_ORIGIN ?? '';
+      if (cors.split(',').some((origin) => origin.trim() === '*')) {
+        throw new Error(
+          "CORS_ORIGIN must list the https origin(s) of the frontend in production, not '*'",
+        );
+      }
+      parseOrigins(cors, { name: 'CORS_ORIGIN', requireHttps: true });
+      // ...and the bcrypt cost cannot be lowered below 10.
       if ((env.BCRYPT_ROUNDS ?? 12) < 10) {
         throw new Error('BCRYPT_ROUNDS must be at least 10 in production');
       }

@@ -60,7 +60,8 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Log out: revoke the current refresh token and clear auth cookies',
+    summary:
+      'Log out this device: revoke its session (refresh and access token) and clear auth cookies',
   })
   @ApiOkResponse({ description: 'User logged out successfully' })
   async logout(@Req() req: Request, @Res() res: Response): Promise<void> {
@@ -167,9 +168,9 @@ export class AuthController {
   @ApiBody({ type: ResendVerificationDTO })
   @ApiTooManyRequestsResponse({ description: 'Too many requests' })
   resendVerification(@Body() body: ResendVerificationDTO): { message: string } {
-    // In background: i tempi di risposta non dipendono dall'esistenza dell'account.
+    // In the background: response times do not depend on whether the account exists.
     this.accountService.queueResendVerification(body.email);
-    // Stessa risposta per qualsiasi indirizzo: non rivela se l'account esiste.
+    // Same response for any address: it does not reveal whether the account exists.
     return {
       message:
         'If the address belongs to an account awaiting verification, a new email has been sent.',
@@ -190,7 +191,7 @@ export class AuthController {
   @ApiTooManyRequestsResponse({ description: 'Too many requests' })
   @ApiBody({ type: ForgotPasswordDTO })
   forgotPassword(@Body() body: ForgotPasswordDTO): { message: string } {
-    // In background: i tempi di risposta non dipendono dall'esistenza dell'account.
+    // In the background: response times do not depend on whether the account exists.
     this.accountService.queuePasswordReset(body.email);
     return {
       message:
