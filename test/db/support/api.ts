@@ -6,12 +6,12 @@ export const PASSWORD = 'Correct-Passw0rd!';
 
 export type Agent = ReturnType<typeof request.agent>;
 
-/** Client senza cookie: ogni richiesta e' indipendente. */
+/** Client without cookies: every request is independent. */
 export function http(h: Harness): ReturnType<typeof request> {
   return request(h.app.getHttpServer());
 }
 
-/** Client con cookie jar (come un browser: rispetta Path/SameSite/Secure). */
+/** Client with a cookie jar (like a browser: it respects Path/SameSite/Secure). */
 export function browser(h: Harness): Agent {
   return request.agent(h.app.getHttpServer());
 }
@@ -29,13 +29,13 @@ export function login(
   return client.post('/api/auth/login').send({ email, password });
 }
 
-/** Mediana di una serie di durate (ms): robusta ai picchi occasionali. */
+/** Median of a series of durations (ms): robust to occasional spikes. */
 export function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-/** Durata (ms) di una chiamata asincrona. */
+/** Duration (ms) of an async call. */
 export async function timed(fn: () => PromiseLike<unknown>): Promise<number> {
   const start = process.hrtime.bigint();
   await fn();
@@ -43,8 +43,8 @@ export async function timed(fn: () => PromiseLike<unknown>): Promise<number> {
 }
 
 /**
- * Attende i lavori in background dell'app (invio email di reinvio/reset: la risposta HTTP
- * non li aspetta, per non rivelare con i tempi se un indirizzo esiste).
+ * Waits for the app's background jobs (sending resend/reset emails: the HTTP response
+ * does not wait for them, so as not to reveal through timings whether an address exists).
  */
 export async function settle(h: Harness): Promise<void> {
   await h.app.get(AccountService).drain();
@@ -58,12 +58,12 @@ export function resetPassword(h: Harness, token: string, password: string) {
   return http(h).post('/api/auth/reset-password').send({ token, password });
 }
 
-/** Conferma l'email scegliendo (o riconfermando) la password dell'account. */
+/** Confirms the email while choosing (or re-confirming) the account's password. */
 export function verifyEmail(h: Harness, token: string, password = PASSWORD) {
   return http(h).post('/api/auth/verify-email').send({ token, password });
 }
 
-/** Registra e conferma l'email tramite il token "ricevuto" nell'outbox. */
+/** Registers and confirms the email through the token "received" in the outbox. */
 export async function createVerifiedUser(
   h: Harness,
   email: string,
@@ -104,7 +104,7 @@ export function findSetCookie(
   return list.find((c) => c.startsWith(`${name}=`));
 }
 
-/** Query SQL diretta sul database di test, con risultato tipizzato. */
+/** Direct SQL query on the test database, with a typed result. */
 export async function sql<T>(
   h: Harness,
   query: string,
@@ -113,7 +113,7 @@ export async function sql<T>(
   return h.db.query<T[]>(query, params);
 }
 
-/** Valore di un cookie impostato dalla risposta (undefined se assente o se cancellato). */
+/** Value of a cookie set by the response (undefined if absent or if deleted). */
 export function cookieValue(
   res: request.Response,
   name: string,
@@ -124,7 +124,7 @@ export function cookieValue(
   return value === '' ? undefined : value;
 }
 
-/** Cookie header "come li manderebbe un browser" con i token scelti dal test. */
+/** Cookie header "as a browser would send it" with the tokens chosen by the test. */
 export function cookieHeader(tokens: {
   access?: string;
   refresh?: string;
@@ -149,7 +149,7 @@ export interface Session {
   refresh: string;
 }
 
-/** Login con credenziali valide; ritorna i due token dai cookie. */
+/** Login with valid credentials; returns the two tokens from the cookies. */
 export async function loginSession(
   h: Harness,
   email: string,

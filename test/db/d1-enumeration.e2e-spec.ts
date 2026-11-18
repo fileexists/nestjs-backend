@@ -1,10 +1,10 @@
 /**
- * D1 - Enumerazione degli account (PostgreSQL vero): stesse risposte e stessi tempi
- * per "utente inesistente", "password errata" e "account solo Google"; registrazione
- * uniforme sia per email nuova sia per email gia registrata.
+ * D1 - Account enumeration (real PostgreSQL): same responses and same timings
+ * for "non-existent user", "wrong password" and "Google-only account"; uniform
+ * registration for both a new and an already registered email.
  */
-// Costo bcrypt "reale" abbastanza alto da rendere misurabile la differenza di tempi;
-// blocco per account disattivato (qui si fanno molti tentativi falliti di proposito).
+// "Real" bcrypt cost high enough to make the timing difference measurable;
+// per-account lock disabled (many failed attempts are made on purpose here).
 process.env.BCRYPT_ROUNDS = '10';
 process.env.LOGIN_MAX_FAILED_ATTEMPTS = '100000';
 
@@ -23,7 +23,7 @@ import { googleLogin } from './support/google';
 
 const SAMPLES = 9;
 
-describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
+describe('D1 - account enumeration (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -37,7 +37,7 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
   });
 
   describe('login', () => {
-    it('utente inesistente, password errata e account solo-Google: stesso status e stesso messaggio', async () => {
+    it('nonexistent user, wrong password and Google-only account: same status and same message', async () => {
       await createVerifiedUser(h, 'known@example.com');
       await googleLogin(h.app, h.google, {
         sub: 'g1',
@@ -63,7 +63,7 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
       expect(message(wrong)).toBe('Invalid email or password');
     });
 
-    it('non suggerisce mai di usare Google ("Please login via google.")', async () => {
+    it('never suggests using Google ("Please login via google.")', async () => {
       await googleLogin(h.app, h.google, {
         sub: 'g1',
         email: 'google-only@example.com',
@@ -73,7 +73,7 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
       expect(JSON.stringify(res.body)).not.toMatch(/google/i);
     });
 
-    it('login senza password: stessa risposta generica', async () => {
+    it('login without a password: same generic response', async () => {
       await createVerifiedUser(h, 'known@example.com');
       const res = await http(h)
         .post('/api/auth/login')
@@ -84,9 +84,9 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
       );
     });
 
-    it('i tempi di risposta sono simili: un utente inesistente costa quanto una password errata', async () => {
+    it('response times are similar: a nonexistent user costs as much as a wrong password', async () => {
       await createVerifiedUser(h, 'known@example.com');
-      await login(h, 'known@example.com', 'warm-up-Passw0rd!'); // riscalda connessioni e JIT
+      await login(h, 'known@example.com', 'warm-up-Passw0rd!'); // warms up connections and the JIT
 
       const unknown: number[] = [];
       const wrong: number[] = [];
@@ -102,16 +102,16 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
       }
 
       const ratio = median(unknown) / median(wrong);
-      // Senza bcrypt fittizio l'utente inesistente risponde in ~2 ms contro ~60 ms (rapporto ~0.03).
+      // Without the dummy bcrypt the non-existent user answers in ~2 ms against ~60 ms (ratio ~0.03).
       expect(ratio).toBeGreaterThan(0.6);
       expect(ratio).toBeLessThan(1.6);
     });
   });
 
-  describe('registrazione', () => {
+  describe('registration', () => {
     const body = (r: { body: unknown }) => JSON.stringify(r.body);
 
-    it('risposta identica (202, senza userId) per email nuova e per email gia registrata', async () => {
+    it('identical response (202, no userId) for a new email and for an already registered one', async () => {
       const fresh = await register(h, 'fresh@example.com');
       await createVerifiedUser(h, 'taken@example.com');
       const taken = await register(h, 'taken@example.com');
@@ -124,7 +124,7 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
       );
     });
 
-    it('anche per un account solo-Google la risposta e identica', async () => {
+    it('the response is identical for a Google-only account too', async () => {
       await googleLogin(h.app, h.google, {
         sub: 'g1',
         email: 'google-only@example.com',
@@ -136,7 +136,7 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
       expect(body(taken)).toBe(body(fresh));
     });
 
-    it("l'email nuova riceve la verifica; quella gia registrata riceve un avviso e NON un token", async () => {
+    it('the new email receives the verification; the already registered one receives a notice and NOT a token', async () => {
       await register(h, 'fresh@example.com');
       await createVerifiedUser(h, 'taken@example.com');
       h.mail.clear();
@@ -146,10 +146,10 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
         h.mail.to('taken@example.com', 'registration-notice'),
       ).toHaveLength(1);
       expect(h.mail.to('taken@example.com', 'verification')).toHaveLength(0);
-      expect(h.mail.to('fresh@example.com', 'verification')).toHaveLength(0); // mail.clear() sopra
+      expect(h.mail.to('fresh@example.com', 'verification')).toHaveLength(0); // mail.clear() above
     });
 
-    it("un tentativo su un'email esistente non crea ne modifica account (nemmeno la password)", async () => {
+    it('an attempt on an existing email creates or modifies no account (not even the password)', async () => {
       await createVerifiedUser(h, 'taken@example.com');
       const before = await sql<{ password: string }>(
         h,
@@ -172,7 +172,7 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
       ).toBe(1);
     });
 
-    it('gli avvisi non permettono di inondare una casella: al massimo uno ogni periodo di attesa', async () => {
+    it('the notices cannot flood a mailbox: at most one per wait period', async () => {
       await createVerifiedUser(h, 'taken@example.com');
       h.mail.clear();
       for (let i = 0; i < 5; i++) await register(h, 'taken@example.com');
@@ -181,7 +181,7 @@ describe('D1 - enumerazione degli account (e2e, PostgreSQL vero)', () => {
       ).toHaveLength(1);
     });
 
-    it('i tempi di risposta sono simili tra email nuova ed email gia registrata', async () => {
+    it('response times are similar between a new email and an already registered one', async () => {
       await createVerifiedUser(h, 'taken@example.com');
       await register(h, 'warmup@example.com');
 

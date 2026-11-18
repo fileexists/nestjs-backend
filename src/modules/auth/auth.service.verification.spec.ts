@@ -1,6 +1,6 @@
 /**
- * A1 - verifica dell'email e collegamento Google (unit).
- * Il comportamento end-to-end sul database vero e' in test/db/a1-*.e2e-spec.ts.
+ * A1 - email verification and Google linking (unit).
+ * The end-to-end behaviour on the real database is in test/db/a1-*.e2e-spec.ts.
  */
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
@@ -63,7 +63,7 @@ function buildResponse(): jest.Mocked<
   return res;
 }
 
-describe('AuthService - verifica email (A1)', () => {
+describe('AuthService - email verification (A1)', () => {
   let service: AuthService;
   let passwordHash: string;
 
@@ -97,7 +97,7 @@ describe('AuthService - verifica email (A1)', () => {
   });
 
   describe('register', () => {
-    it("crea l'utente NON verificato e invia l'email di verifica", async () => {
+    it('creates the user NOT verified and sends the verification email', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
       const created = buildUser({ id: 'new-1', email: 'new@example.com' });
       userService.createUser.mockResolvedValue(created);
@@ -116,7 +116,7 @@ describe('AuthService - verifica email (A1)', () => {
   });
 
   describe('verifyEmail', () => {
-    it("passa all'account l'hash bcrypt della password scelta, mai la password in chiaro", async () => {
+    it('passes the account the bcrypt hash of the chosen password, never the plain password', async () => {
       await service.verifyEmail('raw-token', 'Chosen-Passw0rd!');
 
       expect(mockAccountService.verifyEmail).toHaveBeenCalledTimes(1);
@@ -128,7 +128,7 @@ describe('AuthService - verifica email (A1)', () => {
       expect(await bcrypt.compare('Chosen-Passw0rd!', hash)).toBe(true);
     });
 
-    it("calcola l'hash anche se il token non e valido (stesso costo, nessun indizio)", async () => {
+    it('computes the hash even if the token is not valid (same cost, no clue)', async () => {
       mockAccountService.verifyEmail.mockRejectedValue(
         new Error('Invalid or expired token'),
       );
@@ -141,7 +141,7 @@ describe('AuthService - verifica email (A1)', () => {
   });
 
   describe('login', () => {
-    it('con password corretta ma email NON verificata risponde 403 e non emette cookie', async () => {
+    it('with a correct password but email NOT verified answers 403 and issues no cookie', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: passwordHash, emailVerifiedAt: undefined }),
       );
@@ -157,7 +157,7 @@ describe('AuthService - verifica email (A1)', () => {
       expect(jwtService.signAsync).not.toHaveBeenCalled();
     });
 
-    it("con password SBAGLIATA e email non verificata risponde 401 (non rivela lo stato dell'account)", async () => {
+    it('with a WRONG password and unverified email answers 401 (does not reveal the account state)', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: passwordHash, emailVerifiedAt: undefined }),
       );
@@ -169,7 +169,7 @@ describe('AuthService - verifica email (A1)', () => {
       ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
-    it('con email verificata e password corretta emette i cookie', async () => {
+    it('with a verified email and a correct password issues the cookies', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: passwordHash, emailVerifiedAt: new Date() }),
       );
@@ -193,10 +193,10 @@ describe('AuthService - verifica email (A1)', () => {
     });
   });
 
-  describe('handleGoogleCallback - collegamento sicuro', () => {
+  describe('handleGoogleCallback - safe linking', () => {
     const google = { email: 'mario@example.com', googleId: 'g-123' };
 
-    it('crea un utente Google nuovo gia verificato', async () => {
+    it('creates a new, already verified Google user', async () => {
       userService.getUserByEmail.mockResolvedValue(null);
       userService.createUser.mockResolvedValue(
         buildUser({ googleId: 'g-123', provider: 'google' }),
@@ -219,7 +219,7 @@ describe('AuthService - verifica email (A1)', () => {
       );
     });
 
-    it('su un account locale NON verificato rivendica l account: azzera la password e invalida sessioni e token', async () => {
+    it('on an UNVERIFIED local account claims the account: resets the password and invalidates sessions and tokens', async () => {
       const attackerAccount = buildUser({
         password: 'attacker-hash',
         emailVerifiedAt: undefined,
@@ -244,11 +244,11 @@ describe('AuthService - verifica email (A1)', () => {
         'g-123',
       );
       expect(mockAuthTokenService.invalidateAll).toHaveBeenCalledWith('user-1');
-      // nessun collegamento "normale" che lascerebbe la password dell'attaccante
+      // no "normal" linking that would leave the attacker's password in place
       expect(userService.updateUser).not.toHaveBeenCalled();
     });
 
-    it("se l'account e' stato verificato nel frattempo collega Google mantenendo la password", async () => {
+    it('if the account was verified in the meantime links Google keeping the password', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: 'hash', emailVerifiedAt: undefined }),
       );
@@ -275,7 +275,7 @@ describe('AuthService - verifica email (A1)', () => {
       });
     });
 
-    it('su un account locale VERIFICATO collega Google e mantiene la password (provider combined)', async () => {
+    it('on a VERIFIED local account links Google and keeps the password (provider combined)', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({ password: 'hash', emailVerifiedAt: new Date() }),
       );
@@ -295,7 +295,7 @@ describe('AuthService - verifica email (A1)', () => {
       });
     });
 
-    it('un utente gia combined non causa scritture inutili sul database a ogni login (C2)', async () => {
+    it('an already combined user causes no needless database writes on every login (C2)', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({
           password: 'hash',
@@ -314,7 +314,7 @@ describe('AuthService - verifica email (A1)', () => {
       expect(userService.claimUnverifiedForGoogle).not.toHaveBeenCalled();
     });
 
-    it('imposta i cookie di sessione dopo il collegamento', async () => {
+    it('sets the session cookies after linking', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({
           googleId: 'g-123',
@@ -334,8 +334,8 @@ describe('AuthService - verifica email (A1)', () => {
     });
   });
 
-  describe('handleGoogleCallback - confronto del googleId (B4)', () => {
-    it('rifiuta con 401 account_conflict se l account ha GIA un googleId diverso', async () => {
+  describe('handleGoogleCallback - googleId comparison (B4)', () => {
+    it('rejects with 401 account_conflict if the account ALREADY has a different googleId', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({
           googleId: 'g-original',
@@ -360,7 +360,7 @@ describe('AuthService - verifica email (A1)', () => {
       expect(res.cookie).not.toHaveBeenCalled();
     });
 
-    it('non sovrascrive il googleId nemmeno per account con password (combined)', async () => {
+    it('does not overwrite the googleId even for accounts with a password (combined)', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({
           googleId: 'g-original',
@@ -379,7 +379,7 @@ describe('AuthService - verifica email (A1)', () => {
       expect(userService.updateUser).not.toHaveBeenCalled();
     });
 
-    it("cerca prima per googleId: se l utente esiste entra anche con un'email diversa, senza creare duplicati", async () => {
+    it('looks up by googleId first: if the user exists it gets in even with a different email, without creating duplicates', async () => {
       userService.getUserByGoogleId.mockResolvedValue(
         buildUser({
           email: 'old@example.com',
@@ -404,7 +404,7 @@ describe('AuthService - verifica email (A1)', () => {
       );
     });
 
-    it('con lo stesso googleId in arrivo l account entra normalmente', async () => {
+    it('with the same googleId coming in, the account gets in normally', async () => {
       userService.getUserByEmail.mockResolvedValue(
         buildUser({
           googleId: 'g-123',

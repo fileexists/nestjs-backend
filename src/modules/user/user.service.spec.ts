@@ -91,7 +91,7 @@ describe('UserService', () => {
   });
 
   describe('resetPassword (E)', () => {
-    it('un solo UPDATE: nuova password, email verificata, sessioni invalidate, google -> combined', async () => {
+    it('a single UPDATE: new password, email verified, sessions invalidated, google -> combined', async () => {
       mockUserRepository.update.mockResolvedValue({ affected: 1 });
 
       await service.resetPassword('uuid-1234', '$2b$12$newhash');
@@ -113,9 +113,9 @@ describe('UserService', () => {
     });
   });
 
-  describe('violazione di unicita (D4)', () => {
+  describe('uniqueness violation (D4)', () => {
     it.each([{ code: '23505' }, { driverError: { code: '23505' } }])(
-      'createUser traduce %j in 409 Conflict (mai 500)',
+      'createUser translates %j into 409 Conflict (never 500)',
       async (error) => {
         mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
         mockUserRepository.save.mockRejectedValue(error);
@@ -126,7 +126,7 @@ describe('UserService', () => {
       },
     );
 
-    it('createUser lascia passare gli altri errori', async () => {
+    it('createUser lets the other errors through', async () => {
       mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
       mockUserRepository.save.mockRejectedValue(new Error('connection lost'));
 
@@ -136,8 +136,8 @@ describe('UserService', () => {
     });
   });
 
-  describe('normalizzazione email (B2)', () => {
-    it('getUserByEmail cerca sempre con l email normalizzata', async () => {
+  describe('email normalization (B2)', () => {
+    it('getUserByEmail always looks up with the normalized email', async () => {
       mockUserRepository.findOne.mockResolvedValue(null);
 
       await service.getUserByEmail('  Mario.Rossi@Example.COM ');
@@ -148,7 +148,7 @@ describe('UserService', () => {
       });
     });
 
-    it('createUser salva l email normalizzata', async () => {
+    it('createUser stores the normalized email', async () => {
       mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
       mockUserRepository.save.mockImplementation((u: User) =>
         Promise.resolve(u),
@@ -164,7 +164,7 @@ describe('UserService', () => {
       );
     });
 
-    it('createUser senza email non la inventa', async () => {
+    it('createUser without an email does not invent one', async () => {
       mockUserRepository.create.mockImplementation((d: Partial<User>) => d);
       mockUserRepository.save.mockImplementation((u: User) =>
         Promise.resolve(u),
@@ -177,7 +177,7 @@ describe('UserService', () => {
       });
     });
 
-    it('updateUser normalizza l email quando viene modificata', async () => {
+    it('updateUser normalizes the email when it is changed', async () => {
       mockUserRepository.update.mockResolvedValue({ affected: 1 });
       mockUserRepository.findOne.mockResolvedValue(buildUser());
 

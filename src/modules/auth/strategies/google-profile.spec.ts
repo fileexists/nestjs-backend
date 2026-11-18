@@ -1,10 +1,10 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { mapGoogleProfile } from './google-profile';
 
-describe('mapGoogleProfile (A1: solo email verificate da Google)', () => {
+describe('mapGoogleProfile (A1: only emails verified by Google)', () => {
   const base = { id: 'g-1', displayName: 'Mario' };
 
-  it('accetta un profilo con email verificata', () => {
+  it('accepts a profile with a verified email', () => {
     expect(
       mapGoogleProfile({
         ...base,
@@ -13,7 +13,7 @@ describe('mapGoogleProfile (A1: solo email verificate da Google)', () => {
     ).toEqual({ googleId: 'g-1', email: 'mario@example.com', name: 'Mario' });
   });
 
-  it('normalizza l email (minuscolo, senza spazi): Google puo restituirla in maiuscolo', () => {
+  it('normalizes the email (lowercase, no spaces): Google may return it in uppercase', () => {
     expect(
       mapGoogleProfile({
         ...base,
@@ -22,7 +22,7 @@ describe('mapGoogleProfile (A1: solo email verificate da Google)', () => {
     ).toBe('mario.rossi@example.com');
   });
 
-  it('accetta email_verified espresso come stringa "true" (formati legacy)', () => {
+  it('accepts email_verified expressed as the string "true" (legacy formats)', () => {
     expect(
       mapGoogleProfile({
         ...base,
@@ -31,7 +31,7 @@ describe('mapGoogleProfile (A1: solo email verificate da Google)', () => {
     ).toBe('a@example.com');
   });
 
-  it('usa _json.email_verified quando il flag non e nell elenco emails', () => {
+  it('uses _json.email_verified when the flag is not in the emails list', () => {
     expect(
       mapGoogleProfile({
         ...base,
@@ -41,7 +41,7 @@ describe('mapGoogleProfile (A1: solo email verificate da Google)', () => {
     ).toBe('a@example.com');
   });
 
-  it('rifiuta con 401 un profilo senza email, con messaggio chiaro', () => {
+  it('rejects with 401 a profile without an email, with a clear message', () => {
     expect.assertions(3);
     for (const profile of [
       { ...base },
@@ -62,33 +62,30 @@ describe('mapGoogleProfile (A1: solo email verificate da Google)', () => {
       [{ value: 'a@example.com', verified: false }],
       undefined,
     ],
-    ['flag assente', [{ value: 'a@example.com' }], undefined],
+    ['missing flag', [{ value: 'a@example.com' }], undefined],
     [
-      '"false" come stringa',
+      '"false" as a string',
       [{ value: 'a@example.com', verified: 'false' }],
       undefined,
     ],
     [
-      'esplicito false vince su _json true',
+      'explicit false wins over _json true',
       [{ value: 'a@example.com', verified: false }],
       { email_verified: true },
     ],
-  ])(
-    "rifiuta con 401 un'email non verificata (%s)",
-    (_label, emails, _json) => {
-      let error: unknown;
-      try {
-        mapGoogleProfile({ ...base, emails, _json });
-      } catch (e) {
-        error = e;
-      }
-      expect(error).toBeInstanceOf(UnauthorizedException);
-      expect((error as UnauthorizedException).getStatus()).toBe(401);
-      expect((error as UnauthorizedException).message).toMatch(/not verified/i);
-    },
-  );
+  ])('rejects with 401 an unverified email (%s)', (_label, emails, _json) => {
+    let error: unknown;
+    try {
+      mapGoogleProfile({ ...base, emails, _json });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(UnauthorizedException);
+    expect((error as UnauthorizedException).getStatus()).toBe(401);
+    expect((error as UnauthorizedException).message).toMatch(/not verified/i);
+  });
 
-  it('rifiuta un profilo senza id Google', () => {
+  it('rejects a profile without a Google id', () => {
     expect(() =>
       mapGoogleProfile({
         emails: [{ value: 'a@example.com', verified: true }],

@@ -1,6 +1,6 @@
 /**
- * B2 - La migrazione NormalizeEmails su dati "sporchi" gia presenti nel database:
- * normalizza, gestisce i duplicati senza perdere nulla, crea il vincolo ed e reversibile.
+ * B2 - The NormalizeEmails migration on "dirty" data already in the database:
+ * it normalizes, handles duplicates without losing anything, creates the constraint and is reversible.
  */
 import { DataSource, MigrationInterface } from 'typeorm';
 import {
@@ -14,7 +14,7 @@ const TARGET = 'NormalizeEmails';
 function migrationsUpTo(inclusive: boolean): (new () => MigrationInterface)[] {
   const all = loadMigrations();
   const index = all.findIndex((m) => m.name.startsWith(TARGET));
-  if (index < 0) throw new Error(`Migrazione ${TARGET} non trovata`);
+  if (index < 0) throw new Error(`Migration ${TARGET} not found`);
   return all.slice(0, inclusive ? index + 1 : index);
 }
 
@@ -27,7 +27,7 @@ function dataSource(migrations: (new () => MigrationInterface)[]): DataSource {
   });
 }
 
-describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
+describe('B2 - NormalizeEmails migration (e2e, real PostgreSQL)', () => {
   let before: DataSource;
   let withB2: DataSource;
   const q = <T>(sql: string, params: unknown[] = []) =>
@@ -72,14 +72,14 @@ describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
         ],
       );
 
-    // Singolo con maiuscole -> solo normalizzato
+    // Single account with capitals -> only normalized
     await insert(
       ids.mixedAlone,
       'Mixed.Case@Example.com',
       { password: 'hash-mixed' },
       '2024-01-01',
     );
-    // Coppia: il locale piu' vecchio e quello Google verificato (deve vincere il Google)
+    // Pair: the oldest local one and the verified Google one (Google must win)
     await insert(
       ids.dupLocalOld,
       'dup@example.com',
@@ -92,14 +92,14 @@ describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
       { googleId: 'g-dup', provider: 'google', verified: '2024-02-01' },
       '2024-02-01',
     );
-    // Spazi ai bordi
+    // Spaces at the edges
     await insert(
       ids.spaced,
       '  spaced@example.com ',
       { password: 'hash-spaced' },
       '2024-01-01',
     );
-    // Tripletta senza verificati: vince il piu' vecchio
+    // Triplet with no verified ones: the oldest wins
     await insert(
       ids.triple1,
       'Tri@Example.com',
@@ -118,7 +118,7 @@ describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
       { password: 'p3' },
       '2024-02-01',
     );
-    // Gia' pulito
+    // Already clean
     await insert(
       ids.clean,
       'clean@example.com',
@@ -126,7 +126,7 @@ describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
       '2024-01-01',
     );
 
-    // Un permesso collegato a un duplicato: non deve andare perso.
+    // A permission linked to a duplicate: it must not be lost.
     await before.query(
       `INSERT INTO permissions (id, name, description) VALUES ('10000000-0000-4000-8000-000000000001', 'USER', 'u')`,
     );
@@ -151,34 +151,34 @@ describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
       ])
     )[0];
 
-  it('non perde nessun utente', async () => {
+  it('loses no user', async () => {
     const [{ n }] = await q<{ n: number }>(
       'SELECT count(*)::int AS n FROM users',
     );
     expect(n).toBe(8);
   });
 
-  it('normalizza maiuscole e spazi degli account non duplicati', async () => {
+  it('normalizes case and spaces of the non-duplicate accounts', async () => {
     expect((await row(ids.mixedAlone)).email).toBe('mixed.case@example.com');
     expect((await row(ids.spaced)).email).toBe('spaced@example.com');
     expect((await row(ids.clean)).email).toBe('clean@example.com');
   });
 
-  it('tra duplicati resta canonico l account verificato/Google, non il piu vecchio', async () => {
+  it('among duplicates the verified/Google account stays canonical, not the oldest', async () => {
     const canonical = await row(ids.dupGoogle);
     expect(canonical.email).toBe('dup@example.com');
     expect(canonical.googleId).toBe('g-dup');
     expect(canonical.emailVerifiedAt).not.toBeNull();
   });
 
-  it('il duplicato non viene cancellato: email rinominata, password disattivata, sessioni invalidate', async () => {
+  it('the duplicate is not deleted: email renamed, password disabled, sessions invalidated', async () => {
     const dup = await row(ids.dupLocalOld);
     expect(dup.email).toMatch(/^dup\+dup-\d+-[0-9a-f]{8}@example\.com$/);
     expect(dup.password).toBeNull();
     expect(dup.emailVerifiedAt).toBeNull();
     expect(dup.tokenVersion).toBe(1);
 
-    // i permessi collegati sono ancora li
+    // the linked permissions are still there
     const links = await q<unknown>(
       `SELECT * FROM user_permissions WHERE user_id = $1`,
       [ids.dupLocalOld],
@@ -186,13 +186,13 @@ describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
     expect(links).toHaveLength(1);
   });
 
-  it('tra duplicati senza verificati resta il piu vecchio', async () => {
+  it('among duplicates with none verified the oldest stays', async () => {
     expect((await row(ids.triple1)).email).toBe('tri@example.com');
     expect((await row(ids.triple2)).email).toMatch(/^tri\+dup-/);
     expect((await row(ids.triple3)).email).toMatch(/^tri\+dup-/);
   });
 
-  it('registra ogni modifica con i dati originali (per merge manuale)', async () => {
+  it('records every change with the original data (for manual merge)', async () => {
     const changes = await q<Record<string, unknown>>(
       `SELECT "userId", "originalEmail", "newEmail", reason, "canonicalUserId", "originalPasswordHash"
          FROM user_email_changes ORDER BY "originalEmail"`,
@@ -212,13 +212,13 @@ describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
     expect(changes.find((c) => c.userId === ids.clean)).toBeUndefined();
   });
 
-  it('dopo la migrazione il database rifiuta i duplicati case-insensitive', async () => {
+  it('after the migration the database rejects case-insensitive duplicates', async () => {
     await expect(
       withB2.query(`INSERT INTO users (email) VALUES ('CLEAN@example.com')`),
     ).rejects.toMatchObject({ code: '23505' });
   });
 
-  it('e reversibile: il down ripristina email e password originali e rimuove indice e registro', async () => {
+  it('is reversible: down restores the original emails and passwords and removes the index and the log', async () => {
     await withB2.undoLastMigration();
 
     expect((await row(ids.mixedAlone)).email).toBe('Mixed.Case@Example.com');
@@ -239,11 +239,11 @@ describe('B2 - migrazione NormalizeEmails (e2e, PostgreSQL vero)', () => {
   });
 });
 
-describe('B2 - NormalizeEmails su un database nuovo o gia pulito', () => {
+describe('B2 - NormalizeEmails on a new or already clean database', () => {
   let before: DataSource;
   let withB2: DataSource | undefined;
 
-  // Schema da zero fino alla migrazione precedente, poi (opzionale) un utente gia' in regola.
+  // Schema from scratch up to the previous migration, then (optionally) an already tidy user.
   async function prepare(seedCleanUser: boolean) {
     await withB2?.destroy();
     await before?.destroy();
@@ -281,10 +281,10 @@ describe('B2 - NormalizeEmails su un database nuovo o gia pulito', () => {
   });
 
   it.each([
-    ['database vuoto', false],
-    ['solo email gia in regola', true],
+    ['empty database', false],
+    ['only emails already in order', true],
   ])(
-    '%s: nessuna tabella di archivio, vincolo di unicita presente',
+    '%s: no archive table, uniqueness constraint present',
     async (_name, seed) => {
       await prepare(seed);
 
@@ -299,7 +299,7 @@ describe('B2 - NormalizeEmails su un database nuovo o gia pulito', () => {
     },
   );
 
-  it('il down funziona anche senza tabella di archivio e la migrazione si puo rilanciare', async () => {
+  it('down also works without the archive table and the migration can be run again', async () => {
     await prepare(true);
 
     await withB2!.undoLastMigration();

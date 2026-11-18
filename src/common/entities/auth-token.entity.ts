@@ -12,14 +12,14 @@ import { User } from './user.entity';
 export enum AuthTokenType {
   EMAIL_VERIFICATION = 'email_verification',
   PASSWORD_RESET = 'password_reset',
-  /** Non e' un token: registra l'invio dell'avviso "registrazione su email gia' presente" per limitarne la frequenza. */
+  /** Not a token: records that the "registration on an existing email" notice was sent, to limit how often it is sent. */
   REGISTRATION_NOTICE = 'registration_notice',
 }
 
 /**
- * Token monouso con scadenza (verifica email, reset password).
- * Nel database si conserva solo lo SHA-256 del token: chi legge la tabella
- * non puo' ricostruire un link valido.
+ * Single-use token with an expiry (email verification, password reset).
+ * Only the SHA-256 of the token is kept in the database: whoever reads the table
+ * cannot rebuild a valid link.
  */
 @Entity('auth_tokens')
 @Index('IDX_auth_tokens_user_type', ['userId', 'type'])

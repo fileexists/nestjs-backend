@@ -1,7 +1,7 @@
-/** Codice PostgreSQL della violazione di un vincolo di unicita'. */
+/** PostgreSQL code for a unique constraint violation. */
 export const PG_UNIQUE_VIOLATION = '23505';
 
-/** True se l'errore (di TypeORM/pg) e' una violazione di unicita' (es. email gia' presente). */
+/** True if the (TypeORM/pg) error is a uniqueness violation (e.g. email already present). */
 export function isUniqueViolation(error: unknown): boolean {
   const candidate = error as {
     code?: string;

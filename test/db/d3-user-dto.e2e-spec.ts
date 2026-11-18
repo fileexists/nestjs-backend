@@ -1,6 +1,6 @@
 /**
- * D3 - GET /user/me restituisce solo i campi pubblici (PostgreSQL vero).
- * Prima restituiva l'entita intera, tokenVersion compreso.
+ * D3 - GET /user/me only returns the public fields (real PostgreSQL).
+ * Before it returned the whole entity, tokenVersion included.
  */
 import { createHarness, Harness } from './support/harness';
 import {
@@ -11,7 +11,7 @@ import {
 } from './support/api';
 import { googleLogin } from './support/google';
 
-describe('D3 - UserResponseDto (e2e, PostgreSQL vero)', () => {
+describe('D3 - UserResponseDto (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -27,7 +27,7 @@ describe('D3 - UserResponseDto (e2e, PostgreSQL vero)', () => {
   const me = async (access: string) =>
     http(h).get('/api/user/me').set('Cookie', cookieHeader({ access }));
 
-  it('espone esattamente i campi pubblici e nessun campo interno', async () => {
+  it('exposes exactly the public fields and no internal field', async () => {
     await createVerifiedUser(h, 'mario@example.com');
     const { access } = await loginSession(h, 'mario@example.com');
 
@@ -49,7 +49,7 @@ describe('D3 - UserResponseDto (e2e, PostgreSQL vero)', () => {
   });
 
   it.each(['tokenVersion', 'password', 'googleId', 'emailVerifiedAt'])(
-    'non contiene il campo interno "%s", nemmeno annidato',
+    'does not contain the internal field "%s", not even nested',
     async (field) => {
       await createVerifiedUser(h, 'mario@example.com');
       const { access } = await loginSession(h, 'mario@example.com');
@@ -60,7 +60,7 @@ describe('D3 - UserResponseDto (e2e, PostgreSQL vero)', () => {
     },
   );
 
-  it('i permessi espongono solo id, name e description (niente relazione users)', async () => {
+  it('permissions expose only id, name and description (no users relation)', async () => {
     await createVerifiedUser(h, 'mario@example.com');
     const { access } = await loginSession(h, 'mario@example.com');
 
@@ -78,7 +78,7 @@ describe('D3 - UserResponseDto (e2e, PostgreSQL vero)', () => {
     }
   });
 
-  it('un utente creato da Google non espone googleId ne emailVerifiedAt', async () => {
+  it('a user created by Google exposes neither googleId nor emailVerifiedAt', async () => {
     const { agent } = await googleLogin(h.app, h.google, {
       sub: 'g-secret-sub-123',
       email: 'g@example.com',

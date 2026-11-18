@@ -1,7 +1,7 @@
 import { GoogleAuthException } from '../google-auth.exception';
 import { normalizeEmail } from '../../../common/utils/email';
 
-/** Parte del profilo Passport (passport-google-oauth20, formato OpenID) che ci serve. */
+/** The part of the Passport profile (passport-google-oauth20, OpenID format) that we need. */
 export interface GoogleProfileLike {
   id?: string;
   displayName?: string;
@@ -18,9 +18,9 @@ export interface MappedGoogleProfile {
 const isTrue = (value: unknown): boolean => value === true || value === 'true';
 
 /**
- * Accetta solo profili con email PRESENTE e VERIFICATA da Google
- * (`email_verified === true`): un'email non verificata non prova nulla sul
- * proprietario e non deve mai essere collegata a un account esistente.
+ * Only accepts profiles with an email that is PRESENT and VERIFIED by Google
+ * (`email_verified === true`): an unverified email proves nothing about the
+ * owner and must never be linked to an existing account.
  */
 export function mapGoogleProfile(
   profile: GoogleProfileLike,

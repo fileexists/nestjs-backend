@@ -13,7 +13,7 @@ import {
   UpdatePermissionDTO,
 } from '../../common/dto/permission.dto';
 
-/** Permessi senza i quali l'applicazione non funziona: vengono garantiti a ogni avvio. */
+/** Permissions without which the application does not work: guaranteed at every startup. */
 const REQUIRED_PERMISSIONS = [
   { name: 'USER', description: 'Basic user access' },
 ];
@@ -25,15 +25,15 @@ export class PermissionService implements OnApplicationBootstrap {
     private readonly permissionRepository: Repository<Permission>,
   ) {}
 
-  /** Seed idempotente all'avvio: se un permesso indispensabile manca lo crea. */
+  /** Idempotent seed at startup: if an indispensable permission is missing it creates it. */
   async onApplicationBootstrap(): Promise<void> {
     await this.ensureDefaults();
   }
 
   /**
-   * Crea i permessi indispensabili se mancano. Idempotente e sicuro con piu' istanze
-   * che partono insieme (la violazione di unicita' di chi arriva secondo e' ignorata).
-   * Non tocca i permessi gia' presenti: una descrizione modificata resta com'e'.
+   * Creates the indispensable permissions if they are missing. Idempotent and safe with several instances
+   * starting together (the uniqueness violation of whoever arrives second is ignored).
+   * It does not touch permissions that already exist: an edited description stays as it is.
    */
   async ensureDefaults(): Promise<void> {
     for (const definition of REQUIRED_PERMISSIONS) {
@@ -52,8 +52,8 @@ export class PermissionService implements OnApplicationBootstrap {
   }
 
   /**
-   * Permesso indispensabile (es. USER): se manca NON si crea l'utente senza permessi
-   * in silenzio, si risponde 503.
+   * Indispensable permission (e.g. USER): if it is missing the user is NOT silently created
+   * without permissions, the answer is 503.
    */
   async getRequired(name: string): Promise<Permission> {
     const permission = await this.permissionRepository.findOne({

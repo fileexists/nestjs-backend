@@ -43,7 +43,7 @@ describe('UserController (D3)', () => {
   const me = () =>
     controller.getCurrentUser({ user: { id: 'user-1' } } as never);
 
-  it('restituisce SOLO i campi della whitelist', async () => {
+  it('returns ONLY the whitelisted fields', async () => {
     userService.getUserById.mockResolvedValue(buildUser());
 
     const dto = await me();
@@ -60,7 +60,7 @@ describe('UserController (D3)', () => {
   });
 
   it.each(['tokenVersion', 'password', 'googleId', 'emailVerifiedAt'])(
-    'nessun campo interno: "%s" non compare nel JSON finale (nemmeno annidato)',
+    'no internal field: "%s" does not appear in the final JSON (not even nested)',
     async (field) => {
       userService.getUserById.mockResolvedValue(buildUser());
 
@@ -73,7 +73,7 @@ describe('UserController (D3)', () => {
     },
   );
 
-  it('i permessi espongono solo id, name e description', async () => {
+  it('permissions expose only id, name and description', async () => {
     userService.getUserById.mockResolvedValue(buildUser());
 
     const plain = instanceToPlain(await me()) as {
@@ -87,7 +87,7 @@ describe('UserController (D3)', () => {
     ]);
   });
 
-  it('emailVerified e un booleano calcolato da emailVerifiedAt', async () => {
+  it('emailVerified is a boolean computed from emailVerifiedAt', async () => {
     userService.getUserById.mockResolvedValue(buildUser());
     expect(
       (instanceToPlain(await me()) as { emailVerified: boolean }).emailVerified,
@@ -101,7 +101,7 @@ describe('UserController (D3)', () => {
     ).toBe(false);
   });
 
-  it("l'entita User serializzata direttamente (come fa il serializzatore globale) esclude i campi interni: difesa in profondita", () => {
+  it('the User entity serialized directly (as the global serializer does) excludes the internal fields: defense in depth', () => {
     const plain = instanceToPlain(buildUser());
 
     expect(plain).not.toHaveProperty('password');
@@ -109,7 +109,7 @@ describe('UserController (D3)', () => {
     expect(plain).not.toHaveProperty('googleId');
   });
 
-  it('senza utente autenticato o utente inesistente: 401', async () => {
+  it('without an authenticated user or with a nonexistent user: 401', async () => {
     await expect(controller.getCurrentUser({} as never)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );

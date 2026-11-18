@@ -1,8 +1,8 @@
 /**
- * C1 - FRONTEND_URL con piu origini: il redirect finale e' scelto SOLO tra quelle
- * della whitelist. (PostgreSQL vero)
+ * C1 - FRONTEND_URL with several origins: the final redirect is chosen ONLY among those
+ * in the whitelist. (real PostgreSQL)
  */
-// Prima di importare AppModule: ConfigModule legge l'ambiente al caricamento del modulo.
+// Before importing AppModule: ConfigModule reads the environment when the module loads.
 process.env.FRONTEND_URL = 'http://localhost:3000, http://admin.localhost:3001';
 
 import { createHarness, Harness } from './support/harness';
@@ -10,7 +10,7 @@ import { browser, cookieNames } from './support/api';
 
 const OK = { sub: 'g-1', email: 'mario@example.com', email_verified: true };
 
-describe('C1 - piu origini in FRONTEND_URL (e2e)', () => {
+describe('C1 - several origins in FRONTEND_URL (e2e)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -36,14 +36,14 @@ describe('C1 - piu origini in FRONTEND_URL (e2e)', () => {
     return { init, callback };
   }
 
-  it('senza redirect_to usa la prima origine', async () => {
+  it('without redirect_to uses the first origin', async () => {
     const { callback } = await login();
     expect(new URL(callback!.headers.location).origin).toBe(
       'http://localhost:3000',
     );
   });
 
-  it('con redirect_to uguale alla seconda origine ci torna', async () => {
+  it('with redirect_to equal to the second origin it goes back there', async () => {
     const { callback } = await login('http://admin.localhost:3001');
     expect(callback!.status).toBe(302);
     expect(new URL(callback!.headers.location).origin).toBe(
@@ -52,7 +52,7 @@ describe('C1 - piu origini in FRONTEND_URL (e2e)', () => {
     expect(cookieNames(callback as never)).toContain('access_token');
   });
 
-  it("anche gli errori tornano all'origine scelta", async () => {
+  it('errors also go back to the chosen origin', async () => {
     const client = browser(h);
     await client
       .get('/api/auth/google')
@@ -61,7 +61,7 @@ describe('C1 - piu origini in FRONTEND_URL (e2e)', () => {
       .get('/api/auth/google/callback')
       .query({ code: h.google.codeFor(OK) });
     const url = new URL(res.headers.location);
-    expect(url.origin).toBe('http://localhost:3000'); // state mancante: indice non verificabile -> default
+    expect(url.origin).toBe('http://localhost:3000'); // missing state: the index cannot be verified -> default
     expect(url.searchParams.get('reason')).toBe('state_invalid');
   });
 
@@ -70,12 +70,12 @@ describe('C1 - piu origini in FRONTEND_URL (e2e)', () => {
     'http://admin.localhost:3002',
     'https://admin.localhost:3001',
     'http://evil.com',
-  ])('rifiuta %s (non e nella whitelist)', async (evil) => {
+  ])('rejects %s (it is not in the whitelist)', async (evil) => {
     const { init } = await login(evil);
     expect(init.status).toBe(400);
   });
 
-  it('il redirect scelto non puo essere cambiato al ritorno: il cookie e firmato', async () => {
+  it('the chosen redirect cannot be changed on return: the cookie is signed', async () => {
     const client = browser(h);
     const init = await client
       .get('/api/auth/google')
@@ -87,7 +87,7 @@ describe('C1 - piu origini in FRONTEND_URL (e2e)', () => {
 
     const res = await browser(h)
       .get('/api/auth/google/callback')
-      .set('Cookie', `oauth_state=${nonce}.1.${signature}`) // indice alterato verso l'altra origine
+      .set('Cookie', `oauth_state=${nonce}.1.${signature}`) // tampered index towards the other origin
       .query({ code: h.google.codeFor(OK), state });
 
     expect(cookieNames(res)).not.toContain('access_token');

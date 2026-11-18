@@ -5,7 +5,7 @@ import { Strategy } from 'passport-google-oauth20';
 import { GoogleProfilePayload } from '../../../common/interfaces/jwt-payload.interface';
 import { GoogleProfileLike, mapGoogleProfile } from './google-profile';
 
-/** Il login con Google e' attivo solo se TUTTE e tre le variabili GOOGLE_* sono valorizzate. */
+/** Google login is only active if ALL THREE GOOGLE_* variables are set. */
 export function isGoogleConfigured(configService: ConfigService): boolean {
   return [
     'GOOGLE_CLIENT_ID',
@@ -15,8 +15,8 @@ export function isGoogleConfigured(configService: ConfigService): boolean {
 }
 
 /**
- * Registrata da AuthModule solo se Google e' configurato (vedi `isGoogleConfigured`):
- * nessun valore finto tipo "placeholder-client-id".
+ * Registered by AuthModule only if Google is configured (see `isGoogleConfigured`):
+ * no fake values like "placeholder-client-id".
  */
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
@@ -29,8 +29,8 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     });
   }
 
-  // Ritorna il payload (Nest chiama `done` per noi). I token di Google non servono
-  // e non vengono propagati; lancia 401 se l'email manca o non e' verificata.
+  // Returns the payload (Nest calls `done` for us). Google's tokens are not needed
+  // and are not propagated; throws 401 if the email is missing or not verified.
   validate(
     _accessToken: string,
     _refreshToken: string,

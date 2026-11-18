@@ -33,7 +33,7 @@ export class User {
   @Column({ type: 'int', default: 0 })
   tokenVersion: number;
 
-  /** Impostato quando la proprieta' dell'email e' dimostrata (link via email, reset password o Google). */
+  /** Set when ownership of the email is proven (email link, password reset or Google). */
   @Column({ type: 'timestamptz', nullable: true })
   emailVerifiedAt?: Date;
 

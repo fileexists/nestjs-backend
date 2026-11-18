@@ -19,12 +19,12 @@ const FULL = {
 };
 
 describe('isGoogleConfigured (C2)', () => {
-  it('true solo con tutte e tre le variabili valorizzate', () => {
+  it('true only with all three variables set', () => {
     expect(isGoogleConfigured(config(FULL))).toBe(true);
   });
 
   it.each(['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_CALLBACK_URL'])(
-    'false se manca %s',
+    'false if %s is missing',
     (key) => {
       expect(isGoogleConfigured(config({ ...FULL, [key]: undefined }))).toBe(
         false,
@@ -33,7 +33,7 @@ describe('isGoogleConfigured (C2)', () => {
   );
 
   it.each(['', '   '])(
-    'false per valori vuoti o di soli spazi (%j)',
+    'false for empty or whitespace-only values (%j)',
     (blank) => {
       expect(
         isGoogleConfigured(config({ ...FULL, GOOGLE_CLIENT_ID: blank })),
@@ -43,13 +43,13 @@ describe('isGoogleConfigured (C2)', () => {
 });
 
 describe('GoogleStrategy (C2)', () => {
-  it('non accetta credenziali mancanti: niente placeholder-client-id', () => {
+  it('does not accept missing credentials: no placeholder-client-id', () => {
     expect(() => new GoogleStrategy(config({}))).toThrow(
       /missing GOOGLE_CLIENT_ID/,
     );
   });
 
-  describe('con credenziali', () => {
+  describe('with credentials', () => {
     let strategy: GoogleStrategy;
     beforeAll(() => {
       strategy = new GoogleStrategy(config(FULL));
@@ -58,12 +58,12 @@ describe('GoogleStrategy (C2)', () => {
       (passport as unknown as { unuse(name: string): void }).unuse('google');
     });
 
-    it('chiede solo scope email e profile', () => {
+    it('asks only for the email and profile scopes', () => {
       const scope = (strategy as unknown as { _scope: string[] })._scope;
       expect([...scope].sort()).toEqual(['email', 'profile']);
     });
 
-    it('validate ritorna googleId, email e nome SENZA i token di Google', () => {
+    it('validate returns googleId, email and name WITHOUT the Google tokens', () => {
       const result = strategy.validate(
         'google-access-token',
         'google-refresh-token',
@@ -86,7 +86,7 @@ describe('GoogleStrategy (C2)', () => {
       );
     });
 
-    it("validate rifiuta con 401 un'email non verificata", () => {
+    it('validate rejects an unverified email with 401', () => {
       expect(() =>
         strategy.validate('a', 'r', {
           id: 'g-1',

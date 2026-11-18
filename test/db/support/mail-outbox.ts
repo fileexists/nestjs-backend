@@ -8,13 +8,13 @@ export interface SentMail {
 }
 
 /**
- * Sostituisce MailService negli e2e: registra i messaggi invece di spedirli
- * e permette ai test di leggere i token "ricevuti via email".
+ * Replaces MailService in the e2e tests: it records the messages instead of sending them
+ * and lets the tests read the tokens "received by email".
  */
 export class MailOutbox {
   readonly sent: SentMail[] = [];
 
-  /** Ritardo artificiale (ms) dell'invio del reset password: simula un SMTP lento. */
+  /** Artificial delay (ms) of the password reset send: simulates a slow SMTP. */
   delayMs = 0;
 
   sendVerificationEmail(to: string, token: string): Promise<void> {
@@ -22,7 +22,7 @@ export class MailOutbox {
     return Promise.resolve();
   }
 
-  /** "Qualcuno ha provato a registrarsi con il tuo indirizzo" (registrazione di un'email gia presente). */
+  /** "Someone tried to register with your address" (registration of an email that already exists). */
   sendRegistrationNotice(to: string): Promise<void> {
     this.sent.push({ kind: 'registration-notice', to, token: '' });
     return Promise.resolve();
@@ -40,17 +40,17 @@ export class MailOutbox {
   }
 
   to(address: string, kind?: MailKind): SentMail[] {
-    // Il sistema spedisce all'indirizzo normalizzato: i test possono usare qualsiasi forma.
+    // The system sends to the normalized address: tests can use any form.
     const normalized = address.trim().toLowerCase();
     return this.sent.filter(
       (m) => m.to === normalized && (kind === undefined || m.kind === kind),
     );
   }
 
-  /** Token dell'ultimo messaggio di quel tipo inviato all'indirizzo. */
+  /** Token of the last message of that type sent to the address. */
   lastToken(address: string, kind: MailKind): string {
     const mail = this.to(address, kind).at(-1);
-    if (!mail) throw new Error(`Nessuna email "${kind}" inviata a ${address}`);
+    if (!mail) throw new Error(`No "${kind}" email sent to ${address}`);
     return mail.token;
   }
 }

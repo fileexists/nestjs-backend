@@ -1,6 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 
-/** Motivo (stabile, adatto a finire in un URL) per cui l'accesso con Google e' stato rifiutato. */
+/** Reason (stable, fit to end up in a URL) why the Google login was refused. */
 export type GoogleAuthErrorCode =
   | 'state_invalid'
   | 'email_missing'
@@ -8,7 +8,7 @@ export type GoogleAuthErrorCode =
   | 'account_conflict'
   | 'failed';
 
-/** 401 con un codice: il callback lo traduce nel redirect di errore verso il frontend. */
+/** 401 with a code: the callback turns it into the error redirect to the frontend. */
 export class GoogleAuthException extends UnauthorizedException {
   constructor(
     readonly code: GoogleAuthErrorCode,

@@ -33,14 +33,14 @@ describe('MailService', () => {
     createTransport.mockReturnValue({ sendMail });
   });
 
-  it('usa SMTP_HOST e SMTP_PORT per il trasporto', () => {
+  it('uses SMTP_HOST and SMTP_PORT for the transport', () => {
     build();
     expect(createTransport).toHaveBeenCalledWith(
       expect.objectContaining({ host: 'mailpit', port: 1025, secure: false }),
     );
   });
 
-  it('autentica solo se SMTP_USER e impostato', () => {
+  it('authenticates only if SMTP_USER is set', () => {
     build();
     expect(
       ((createTransport.mock.calls as unknown[][])[0][0] as { auth?: unknown })
@@ -54,7 +54,7 @@ describe('MailService', () => {
     ).toEqual({ user: 'u', pass: 'p' });
   });
 
-  it('il link di verifica punta alla PRIMA origine del frontend e contiene il token', async () => {
+  it('the verification link points to the FIRST frontend origin and contains the token', async () => {
     await build().sendVerificationEmail('user@example.com', 'tok_abc-123');
 
     const message = (sendMail.mock.calls as unknown[][])[0][0] as {
@@ -75,7 +75,7 @@ describe('MailService', () => {
     expect(message.text).not.toContain('admin.example.com');
   });
 
-  it('codifica il token nell URL e scappa l HTML', async () => {
+  it('encodes the token in the URL and escapes the HTML', async () => {
     await build().sendVerificationEmail('user@example.com', 'a b&c');
     const message = (sendMail.mock.calls as unknown[][])[0][0] as {
       text: string;
@@ -85,7 +85,7 @@ describe('MailService', () => {
     expect(message.html).not.toContain('token=a b&c');
   });
 
-  it("l'avviso di registrazione contiene i link di accesso e di reset verso il frontend", async () => {
+  it('the registration notice contains the sign-in and reset links to the frontend', async () => {
     await build().sendRegistrationNotice('user@example.com');
 
     const message = (sendMail.mock.calls as unknown[][])[0][0] as {
@@ -94,13 +94,13 @@ describe('MailService', () => {
       text: string;
     };
     expect(message.to).toBe('user@example.com');
-    expect(message.subject).toMatch(/registrazione/i);
+    expect(message.subject).toMatch(/registration/i);
     expect(message.text).toContain('https://app.example.com/login');
     expect(message.text).toContain('https://app.example.com/forgot-password');
     expect(message.text).not.toContain('token=');
   });
 
-  it('il link di reset password punta al frontend e contiene il token (valido 1 ora)', async () => {
+  it('the password reset link points to the frontend and contains the token (valid for 1 hour)', async () => {
     await build().sendPasswordResetEmail('user@example.com', 'reset_tok-1');
 
     const message = (sendMail.mock.calls as unknown[][])[0][0] as {
@@ -113,17 +113,17 @@ describe('MailService', () => {
       'https://app.example.com/reset-password?token=reset_tok-1',
     );
     expect(message.html).toContain('/reset-password?token=reset_tok-1');
-    expect(message.text).toMatch(/1 ora/);
+    expect(message.text).toMatch(/1 hour/);
   });
 
-  it('propaga gli errori SMTP al chiamante', async () => {
+  it('propagates SMTP errors to the caller', async () => {
     sendMail.mockRejectedValueOnce(new Error('ECONNREFUSED'));
     await expect(
       build().sendVerificationEmail('user@example.com', 't'),
     ).rejects.toThrow('ECONNREFUSED');
   });
 
-  describe('tentativi', () => {
+  describe('retries', () => {
     const timeout = () =>
       Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' });
 
@@ -135,7 +135,7 @@ describe('MailService', () => {
       jest.useRealTimers();
     });
 
-    it('riprova dopo un errore di rete e alla fine invia', async () => {
+    it('retries after a network error and finally sends', async () => {
       sendMail.mockRejectedValueOnce(timeout());
       const sending = build().sendVerificationEmail('user@example.com', 't');
 
@@ -145,7 +145,7 @@ describe('MailService', () => {
       expect(sendMail).toHaveBeenCalledTimes(2);
     });
 
-    it('rinuncia dopo 3 tentativi e propaga l ultimo errore', async () => {
+    it('gives up after 3 attempts and propagates the last error', async () => {
       sendMail.mockRejectedValue(timeout());
       const sending = build().sendVerificationEmail('user@example.com', 't');
       const outcome = expect(sending).rejects.toThrow('timeout');
@@ -158,7 +158,7 @@ describe('MailService', () => {
       expect(sendMail).toHaveBeenCalledTimes(3);
     });
 
-    it('non riprova un errore definitivo (rifiuto 5xx)', async () => {
+    it('does not retry a permanent error (5xx rejection)', async () => {
       sendMail.mockRejectedValue(
         Object.assign(new Error('mailbox unavailable'), { responseCode: 550 }),
       );
@@ -179,7 +179,7 @@ describe('isTransientMailError', () => {
     [{ responseCode: 450 }, true],
     [{ responseCode: 550 }, false],
     [{ code: 'EAUTH', responseCode: 535 }, false],
-    [new Error('boh'), false],
+    [new Error('whatever'), false],
     [null, false],
   ])('%j -> %s', (error, expected) => {
     expect(isTransientMailError(error)).toBe(expected);
@@ -188,11 +188,11 @@ describe('isTransientMailError', () => {
 
 describe('humanizeTtl', () => {
   it.each([
-    [60_000, '1 minuto'],
-    [30 * 60_000, '30 minuti'],
-    [3_600_000, '1 ora'],
-    [24 * 3_600_000, '24 ore'],
-    [72 * 3_600_000, '3 giorni'],
+    [60_000, '1 minute'],
+    [30 * 60_000, '30 minutes'],
+    [3_600_000, '1 hour'],
+    [24 * 3_600_000, '24 hours'],
+    [72 * 3_600_000, '3 days'],
   ])('%i ms -> %s', (ms, label) => {
     expect(humanizeTtl(ms)).toBe(label);
   });

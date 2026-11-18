@@ -1,6 +1,6 @@
 /**
- * B2 - Normalizzazione delle email (PostgreSQL vero).
- * Prima: `Mario.Rossi@Example.com` e `mario.rossi@example.com` creavano due account.
+ * B2 - Email normalization (real PostgreSQL).
+ * Before: `Mario.Rossi@Example.com` and `mario.rossi@example.com` created two accounts.
  */
 import { createHarness, Harness } from './support/harness';
 import {
@@ -19,7 +19,7 @@ import { googleLogin } from './support/google';
 const MIXED = 'Mario.Rossi@Example.com';
 const LOWER = 'mario.rossi@example.com';
 
-describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
+describe('B2 - case-insensitive email (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -35,7 +35,7 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
   const userCount = async () =>
     (await sql<{ n: number }>(h, 'SELECT count(*)::int AS n FROM users'))[0].n;
 
-  it('la registrazione salva l email in minuscolo e senza spazi', async () => {
+  it('registration stores the email in lowercase and without spaces', async () => {
     const res = await register(h, `  ${MIXED}  `);
     expect(res.status).toBeLessThan(300);
 
@@ -43,7 +43,7 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
     expect(rows).toEqual([{ email: LOWER }]);
   });
 
-  it('due registrazioni che differiscono solo per maiuscole creano UN solo account', async () => {
+  it('two registrations that differ only in case create ONE account', async () => {
     await register(h, MIXED);
     const second = await register(h, LOWER);
 
@@ -51,7 +51,7 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
     expect(await userCount()).toBe(1);
   });
 
-  it('il login funziona con qualsiasi combinazione di maiuscole e spazi', async () => {
+  it('login works with any combination of case and spaces', async () => {
     await createVerifiedUser(h, MIXED);
 
     for (const variant of [MIXED, LOWER, LOWER.toUpperCase(), `  ${LOWER} `]) {
@@ -60,7 +60,7 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
     }
   });
 
-  it('verifica email e reinvio accettano l email in qualsiasi forma', async () => {
+  it('email verification and resend accept the email in any form', async () => {
     await register(h, LOWER);
     const token = h.mail.lastToken(LOWER, 'verification');
 
@@ -73,7 +73,7 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
     expect((await userRow(h, LOWER))?.emailVerifiedAt).not.toBeNull();
   });
 
-  it('Google con email in maiuscolo collega l account esistente invece di crearne un secondo', async () => {
+  it('Google with an uppercase email links the existing account instead of creating a second one', async () => {
     await createVerifiedUser(h, LOWER);
 
     await googleLogin(h.app, h.google, {
@@ -86,7 +86,7 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
     expect((await userRow(h, LOWER))?.googleId).toBe('g-1');
   });
 
-  it('un utente creato da Google ha l email normalizzata', async () => {
+  it('a user created by Google has the normalized email', async () => {
     await googleLogin(h.app, h.google, {
       sub: 'g-2',
       email: 'New.User@Example.COM',
@@ -95,8 +95,8 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
     expect((await userRow(h, 'new.user@example.com'))?.googleId).toBe('g-2');
   });
 
-  describe('vincolo nel database (indice univoco su lower(email))', () => {
-    it('rifiuta un secondo utente che differisce solo per maiuscole, anche con SQL diretto', async () => {
+  describe('database constraint (unique index on lower(email))', () => {
+    it('rejects a second user that differs only in case, even with direct SQL', async () => {
       await register(h, LOWER);
 
       await expect(
@@ -105,7 +105,7 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
       expect(await userCount()).toBe(1);
     });
 
-    it("l'indice e' quello atteso (funzionale e univoco)", async () => {
+    it('the index is the expected one (functional and unique)', async () => {
       const rows = await sql<{ indexdef: string }>(
         h,
         `SELECT indexdef FROM pg_indexes WHERE tablename = 'users' AND indexname = 'UQ_users_email_lower'`,
@@ -116,7 +116,7 @@ describe('B2 - email case-insensitive (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  it('(sanity) la password resta valida', async () => {
+  it('(sanity) the password is still valid', async () => {
     await createVerifiedUser(h, LOWER, PASSWORD);
     expect((await login(h, LOWER, PASSWORD)).status).toBe(200);
   });

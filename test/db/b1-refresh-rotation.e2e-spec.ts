@@ -1,6 +1,6 @@
 /**
- * B1 - Rotazione reale dei refresh token (PostgreSQL vero).
- * Prima: lo stesso refresh token funzionava all'infinito e dopo il logout valeva ancora.
+ * B1 - Real refresh token rotation (real PostgreSQL).
+ * Before: the same refresh token worked forever and was still valid after logout.
  */
 import { AuthCleanupService } from '../../src/modules/auth/auth-cleanup.service';
 import { createHarness, Harness } from './support/harness';
@@ -32,7 +32,7 @@ interface RefreshRow {
 const refreshRows = (h: Harness) =>
   sql<RefreshRow>(h, 'SELECT * FROM refresh_tokens ORDER BY "createdAt", id');
 
-describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
+describe('B1 - refresh token rotation (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -46,7 +46,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
     await createVerifiedUser(h, EMAIL);
   });
 
-  it('il login crea una famiglia con un refresh token registrato (solo hash) e non usato', async () => {
+  it('login creates a family with a registered refresh token (hash only) that is unused', async () => {
     const session = await loginSession(h, EMAIL);
 
     const rows = await refreshRows(h);
@@ -58,7 +58,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
     expect(rows[0].expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
-  it('POST /auth/refresh ruota: vecchio token usato, nuovo token nella stessa famiglia', async () => {
+  it('POST /auth/refresh rotates: old token used, new token in the same family', async () => {
     const first = await loginSession(h, EMAIL);
 
     const res = await refresh(h, first.refresh);
@@ -74,20 +74,20 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
     expect(newRow.familyId).toBe(oldRow.familyId);
   });
 
-  it('un refresh token gia usato viene rifiutato (401)', async () => {
+  it('an already used refresh token is rejected (401)', async () => {
     const first = await loginSession(h, EMAIL);
     expect((await refresh(h, first.refresh)).status).toBe(200);
     expect((await refresh(h, first.refresh)).status).toBe(401);
   });
 
   describe('reuse detection', () => {
-    it("al riuso revoca l'intera famiglia: anche il token piu recente smette di funzionare", async () => {
+    it('on reuse it revokes the whole family: even the most recent token stops working', async () => {
       const first = await loginSession(h, EMAIL);
       const rotated = await refresh(h, first.refresh);
       const second = cookieValue(rotated, 'refresh_token')!;
       const third = cookieValue(await refresh(h, second), 'refresh_token')!;
 
-      // L'attaccante ripresenta il PRIMO token (rubato).
+      // The attacker presents the FIRST (stolen) token again.
       expect((await refresh(h, first.refresh)).status).toBe(401);
 
       expect((await refresh(h, third)).status).toBe(401);
@@ -95,7 +95,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
       expect(rows.every((r) => r.revokedAt !== null)).toBe(true);
     });
 
-    it('al riuso invalida le sessioni: tokenVersion incrementato e access token precedenti rifiutati', async () => {
+    it('on reuse it invalidates the sessions: tokenVersion incremented and earlier access tokens rejected', async () => {
       const first = await loginSession(h, EMAIL);
       const before = await userRow(h, EMAIL);
       const accessBefore = cookieValue(
@@ -110,7 +110,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
         ).status,
       ).toBe(200);
 
-      await refresh(h, first.refresh); // riuso
+      await refresh(h, first.refresh); // reuse
 
       expect((await userRow(h, EMAIL))?.tokenVersion).toBe(
         (before?.tokenVersion ?? 0) + 1,
@@ -124,31 +124,31 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
       ).toBe(401);
     });
 
-    it('il riuso in una famiglia non tocca le altre famiglie dello stesso utente ma ne invalida le sessioni (tokenVersion)', async () => {
+    it("reuse in one family does not touch the user's other families but invalidates their sessions (tokenVersion)", async () => {
       const laptop = await loginSession(h, EMAIL);
       const phone = await loginSession(h, EMAIL);
       await refresh(h, laptop.refresh);
-      await refresh(h, laptop.refresh); // riuso sul laptop
+      await refresh(h, laptop.refresh); // reuse on the laptop
 
       const families = new Set((await refreshRows(h)).map((r) => r.familyId));
       expect(families.size).toBe(2);
-      // il telefono ha un refresh token con tokenVersion vecchio: rifiutato
+      // the phone has a refresh token with an old tokenVersion: rejected
       expect((await refresh(h, phone.refresh)).status).toBe(401);
     });
   });
 
-  describe('rifiuti', () => {
-    it('senza cookie -> 401', async () => {
+  describe('rejections', () => {
+    it('no cookie -> 401', async () => {
       expect((await refresh(h, undefined)).status).toBe(401);
     });
 
-    it('token con firma non valida -> 401', async () => {
+    it('token with an invalid signature -> 401', async () => {
       const { refresh: token } = await loginSession(h, EMAIL);
       const tampered = `${token.slice(0, -3)}abc`;
       expect((await refresh(h, tampered)).status).toBe(401);
     });
 
-    it('token scaduto nel database -> 401', async () => {
+    it('token expired in the database -> 401', async () => {
       const { refresh: token } = await loginSession(h, EMAIL);
       await h.db.query(
         `UPDATE refresh_tokens SET "expiresAt" = now() - interval '1 minute'`,
@@ -156,14 +156,14 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
       expect((await refresh(h, token)).status).toBe(401);
     });
 
-    it('token firmato correttamente ma non presente in tabella (es. emesso prima della rotazione) -> 401', async () => {
+    it('correctly signed token that is not in the table (e.g. issued before the rotation) -> 401', async () => {
       const { refresh: token } = await loginSession(h, EMAIL);
       await h.db.query('DELETE FROM refresh_tokens');
       expect((await refresh(h, token)).status).toBe(401);
     });
   });
 
-  it('due refresh concorrenti con lo stesso token: ne riesce uno solo', async () => {
+  it('two concurrent refreshes with the same token: only one succeeds', async () => {
     const { refresh: token } = await loginSession(h, EMAIL);
     const results = await Promise.all([
       refresh(h, token),
@@ -175,7 +175,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
   });
 
   describe('logout', () => {
-    it('revoca il refresh token corrente: dopo il logout non si puo piu rinnovare', async () => {
+    it('revokes the current refresh token: after logout it can no longer be renewed', async () => {
       const session = await loginSession(h, EMAIL);
 
       const res = await http(h)
@@ -188,7 +188,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
       expect((await refresh(h, session.refresh)).status).toBe(401);
     });
 
-    it('revoca anche i token gia ruotati della stessa famiglia', async () => {
+    it('also revokes the already rotated tokens of the same family', async () => {
       const first = await loginSession(h, EMAIL);
       const second = cookieValue(
         await refresh(h, first.refresh),
@@ -202,7 +202,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
       expect((await refresh(h, second)).status).toBe(401);
     });
 
-    it('non tocca le altre sessioni dello stesso utente', async () => {
+    it("does not touch the user's other sessions", async () => {
       const laptop = await loginSession(h, EMAIL);
       const phone = await loginSession(h, EMAIL);
 
@@ -213,7 +213,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
       expect((await refresh(h, phone.refresh)).status).toBe(200);
     });
 
-    it('senza cookie risponde comunque 200 (idempotente) e cancella i cookie', async () => {
+    it('without a cookie still answers 200 (idempotent) and clears the cookies', async () => {
       const res = await http(h).post('/api/auth/logout');
       expect(res.status).toBe(200);
       expect(cookieNames(res)).toEqual(
@@ -221,7 +221,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
       );
     });
 
-    it('con un cookie spazzatura risponde 200 senza errori', async () => {
+    it('with a garbage cookie answers 200 without errors', async () => {
       const res = await http(h)
         .post('/api/auth/logout')
         .set('Cookie', cookieHeader({ refresh: 'not-a-jwt' }));
@@ -230,7 +230,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
   });
 
   describe('logout-all', () => {
-    it('revoca tutte le famiglie e invalida subito gli access token', async () => {
+    it('revokes all the families and immediately invalidates the access tokens', async () => {
       const laptop = await loginSession(h, EMAIL);
       const phone = await loginSession(h, EMAIL);
 
@@ -258,7 +258,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  it('GET /auth/validate rinnova con il refresh token e ruota (il vecchio non vale piu)', async () => {
+  it('GET /auth/validate renews with the refresh token and rotates (the old one is no longer valid)', async () => {
     const { refresh: token } = await loginSession(h, EMAIL);
 
     const res = await http(h)
@@ -269,8 +269,8 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
     expect((await refresh(h, token)).status).toBe(401);
   });
 
-  describe('pulizia periodica', () => {
-    it('elimina i refresh token scaduti e i token monouso scaduti, lasciando intatti gli altri', async () => {
+  describe('periodic cleanup', () => {
+    it('deletes the expired refresh tokens and expired one-time tokens, leaving the others untouched', async () => {
       await loginSession(h, EMAIL);
       await loginSession(h, EMAIL);
       await h.db.query(
@@ -296,7 +296,7 @@ describe('B1 - rotazione refresh token (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  it('(sanity) la password resta quella attesa dopo tutte queste operazioni', async () => {
+  it('(sanity) the password stays the expected one after all these operations', async () => {
     await loginSession(h, EMAIL, PASSWORD);
   });
 });

@@ -1,8 +1,8 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
 /**
- * La FK verso `permissions` era NO ACTION, mentre l'entita' descrive CASCADE (come quella
- * verso `users`): cancellare un permesso ancora assegnato falliva con un errore di vincolo.
+ * The FK to `permissions` was NO ACTION, while the entity describes CASCADE (like the one
+ * to `users`): deleting a permission that was still assigned failed with a constraint error.
  */
 export class UserPermissionsCascade1794876000000 implements MigrationInterface {
     name = 'UserPermissionsCascade1794876000000'

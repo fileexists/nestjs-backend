@@ -52,8 +52,8 @@ import type { StringValue } from 'ms';
     LoginAttemptService,
     AuthCleanupService,
     GoogleCallbackExceptionFilter,
-    // Provider opzionale: senza GOOGLE_* non si registra nessuna strategia e gli
-    // endpoint Google rispondono 501 (vedi i guard).
+    // Optional provider: without GOOGLE_* no strategy is registered and the
+    // Google endpoints answer 501 (see the guards).
     {
       provide: GoogleStrategy,
       useFactory: (configService: ConfigService) =>

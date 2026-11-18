@@ -1,7 +1,7 @@
 /**
- * B4 - Google: confronto del googleId (PostgreSQL vero).
- * Prima: un utente con un googleId diverso da quello in arrivo entrava comunque
- * (e per gli account con password il googleId veniva perfino sovrascritto).
+ * B4 - Google: googleId comparison (real PostgreSQL).
+ * Before: a user with a googleId different from the incoming one got in anyway
+ * (and for accounts with a password the googleId was even overwritten).
  */
 import { createHarness, Harness } from './support/harness';
 import {
@@ -15,7 +15,7 @@ import {
 } from './support/api';
 import { googleLogin } from './support/google';
 
-describe('B4 - googleId (e2e, PostgreSQL vero)', () => {
+describe('B4 - googleId (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -31,7 +31,7 @@ describe('B4 - googleId (e2e, PostgreSQL vero)', () => {
   const userCount = async () =>
     (await sql<{ n: number }>(h, 'SELECT count(*)::int AS n FROM users'))[0].n;
 
-  it('rifiuta (401) un googleId diverso da quello gia collegato e non lo sovrascrive', async () => {
+  it('rejects (401) a googleId different from the one already linked and does not overwrite it', async () => {
     await googleLogin(h.app, h.google, {
       sub: 'g-original',
       email: 'mario@example.com',
@@ -51,7 +51,7 @@ describe('B4 - googleId (e2e, PostgreSQL vero)', () => {
     expect(await userCount()).toBe(1);
   });
 
-  it('un account combined (con password) non permette di sostituire il googleId', async () => {
+  it('a combined account (with a password) does not allow replacing the googleId', async () => {
     await createVerifiedUser(h, 'mario@example.com');
     await googleLogin(h.app, h.google, {
       sub: 'g-original',
@@ -71,7 +71,7 @@ describe('B4 - googleId (e2e, PostgreSQL vero)', () => {
     expect(row?.provider).toBe('combined');
   });
 
-  it("con lo stesso googleId ma un'email diversa (cambiata su Google) entra nello stesso account, senza crearne un secondo ne errori 500", async () => {
+  it('with the same googleId but a different email (changed on Google) gets into the same account, without creating a second one or 500 errors', async () => {
     await googleLogin(h.app, h.google, {
       sub: 'g-1',
       email: 'old@example.com',
@@ -94,7 +94,7 @@ describe('B4 - googleId (e2e, PostgreSQL vero)', () => {
     expect((me.body as { email: string }).email).toBe('old@example.com');
   });
 
-  it("l'identita Google (sub) prevale sull'email: sub di A con email di B entra in A, non in B", async () => {
+  it('the Google identity (sub) wins over the email: the sub of A with the email of B gets into A, not B', async () => {
     await googleLogin(h.app, h.google, {
       sub: 'g-a',
       email: 'a@example.com',

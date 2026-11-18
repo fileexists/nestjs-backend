@@ -1,6 +1,6 @@
 /**
- * C1 - Il callback Google imposta i cookie e fa redirect al frontend (FRONTEND_URL),
- * con esito di successo o di errore, senza mai redirect aperti. (PostgreSQL vero)
+ * C1 - The Google callback sets the cookies and redirects to the frontend (FRONTEND_URL),
+ * with a success or error outcome, never with open redirects. (real PostgreSQL)
  */
 import { createHarness, Harness } from './support/harness';
 import {
@@ -17,7 +17,7 @@ import { googleLogin } from './support/google';
 const FRONTEND = 'http://localhost:3000';
 const OK = { sub: 'g-1', email: 'mario@example.com', email_verified: true };
 
-describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
+describe('C1 - Google callback redirect (e2e, real PostgreSQL)', () => {
   let h: Harness;
 
   beforeAll(async () => {
@@ -33,8 +33,8 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
   const location = (res: { headers: Record<string, unknown> }) =>
     new URL(res.headers.location as string);
 
-  describe('successo', () => {
-    it('risponde 302 verso FRONTEND_URL con status=success e senza JSON', async () => {
+  describe('success', () => {
+    it('answers 302 to FRONTEND_URL with status=success and no JSON', async () => {
       const { callback } = await googleLogin(h.app, h.google, OK);
 
       expect(callback.status).toBe(302);
@@ -46,7 +46,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       expect(callback.body).toEqual({});
     });
 
-    it('imposta i cookie di sessione (httpOnly) e nessun token compare nell URL di redirect', async () => {
+    it('sets the session cookies (httpOnly) and no token appears in the redirect URL', async () => {
       const { callback } = await googleLogin(h.app, h.google, OK);
 
       expect(cookieNames(callback)).toEqual(
@@ -59,14 +59,14 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       expect(target).not.toContain(cookieValue(callback, 'refresh_token')!);
     });
 
-    it('la sessione ottenuta funziona sulle API', async () => {
+    it('the obtained session works on the APIs', async () => {
       const { agent } = await googleLogin(h.app, h.google, OK);
 
       expect((await agent.get('/api/user/me')).status).toBe(200);
     });
   });
 
-  describe('errori: redirect con status=error e un motivo, mai sessioni', () => {
+  describe('errors: redirect with status=error and a reason, never sessions', () => {
     const expectError = (
       res: { status: number; headers: Record<string, unknown> },
       reason: string,
@@ -81,7 +81,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       expect(cookieNames(res as never)).not.toContain('refresh_token');
     };
 
-    it('email non verificata da Google', async () => {
+    it('email not verified by Google', async () => {
       const { callback } = await googleLogin(h.app, h.google, {
         sub: 'g',
         email: 'x@example.com',
@@ -90,7 +90,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       expectError(callback, 'email_unverified');
     });
 
-    it('profilo senza email', async () => {
+    it('profile without an email', async () => {
       const { callback } = await googleLogin(h.app, h.google, {
         sub: 'g',
         email_verified: true,
@@ -98,7 +98,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       expectError(callback, 'email_missing');
     });
 
-    it('state mancante o non valido', async () => {
+    it('missing or invalid state', async () => {
       const client = browser(h);
       await client.get('/api/auth/google');
       const res = await client
@@ -107,7 +107,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       expectError(res, 'state_invalid');
     });
 
-    it('googleId diverso da quello collegato', async () => {
+    it('googleId different from the linked one', async () => {
       await googleLogin(h.app, h.google, OK);
       const { callback } = await googleLogin(h.app, h.google, {
         ...OK,
@@ -116,7 +116,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       expectError(callback, 'account_conflict');
     });
 
-    it("l'utente nega il consenso su Google (?error=access_denied)", async () => {
+    it('the user denies consent on Google (?error=access_denied)', async () => {
       const client = browser(h);
       const init = await client.get('/api/auth/google');
       const state = new URL(init.headers.location).searchParams.get('state')!;
@@ -126,7 +126,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       expectError(res, 'failed');
     });
 
-    it('nessun utente viene creato quando il login fallisce', async () => {
+    it('no user is created when the login fails', async () => {
       await googleLogin(h.app, h.google, {
         sub: 'g',
         email: 'x@example.com',
@@ -140,8 +140,8 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  describe('nessun open redirect', () => {
-    it('la destinazione non dipende da Host, Referer, X-Forwarded-Host ne da parametri del callback', async () => {
+  describe('no open redirect', () => {
+    it('the destination does not depend on Host, Referer, X-Forwarded-Host or on callback parameters', async () => {
       const client = browser(h);
       const init = await client.get('/api/auth/google');
       const state = new URL(init.headers.location).searchParams.get('state')!;
@@ -163,7 +163,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       expect(location(res).origin).toBe(FRONTEND);
     });
 
-    it('/auth/google rifiuta un redirect_to fuori whitelist con 400 e non avvia il flusso', async () => {
+    it('/auth/google rejects a redirect_to outside the whitelist with 400 and does not start the flow', async () => {
       for (const evil of [
         'https://evil.example.com',
         'http://localhost:3000.evil.com',
@@ -179,7 +179,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
       }
     });
 
-    it("/auth/google accetta redirect_to uguale a un'origine della whitelist", async () => {
+    it('/auth/google accepts a redirect_to equal to an origin in the whitelist', async () => {
       const res = await http(h)
         .get('/api/auth/google')
         .query({ redirect_to: FRONTEND });
@@ -187,7 +187,7 @@ describe('C1 - redirect del callback Google (e2e, PostgreSQL vero)', () => {
     });
   });
 
-  it("l'utente con password che entra da Google riceve comunque il redirect di successo", async () => {
+  it('a user with a password who signs in from Google still gets the success redirect', async () => {
     await createVerifiedUser(h, 'mario@example.com');
     const { callback } = await googleLogin(h.app, h.google, OK);
     expect(callback.status).toBe(302);

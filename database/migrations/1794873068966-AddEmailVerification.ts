@@ -1,18 +1,16 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * A1 - Verifica dell'email.
+ * A1 - Email verification.
  *
- * - users."emailVerifiedAt": quando la proprieta' dell'email e' stata dimostrata.
- * - auth_tokens: token monouso con scadenza (verifica email, reset password).
+ * - users."emailVerifiedAt": when ownership of the email was proven.
+ * - auth_tokens: single-use tokens with an expiry (email verification, password reset).
  *
- * Backfill: sono considerati verificati SOLO gli account creati da Google
- * (nessuna password). Tutti gli altri (locali e "combined") restano non
- * verificati: la password di un account locale non e' mai stata associata a
- * una prova di possesso dell'email e potrebbe essere stata scelta da un
- * attaccante (pre-hijacking). Per accedere con la password dovranno verificare
- * l'email; con Google (email verificata da Google) l'account viene "rivendicato"
- * dal proprietario reale.
+ * Backfill: ONLY accounts created by Google (no password) are considered verified.
+ * All the others (local and "combined") stay unverified: the password of a local account
+ * was never tied to proof of owning the email and may have been chosen by an attacker
+ * (pre-hijacking). To log in with the password they must verify the email; with Google
+ * (email verified by Google) the account is "claimed" by the real owner.
  */
 export class AddEmailVerification1794873068966 implements MigrationInterface {
   name = 'AddEmailVerification1794873068966';

@@ -1,30 +1,31 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * B2 - Email case-insensitive.
+ * B2 - Case-insensitive email.
  *
- * 1. Normalizza le email esistenti (trim + minuscolo).
- * 2. Gestisce i duplicati (stessa email a meno di maiuscole/spazi) SENZA perdere dati:
- *    - resta "canonico" l'account piu' affidabile: prima quello con email verificata,
- *      poi quello con Google collegato, poi il piu' vecchio;
- *    - gli altri NON vengono cancellati: la riga resta (permessi e dati compresi), ma
- *      l'email diventa `local+dup-<n>-<id>@dominio` (<n> = posizione nel gruppo, quindi unica), la password viene disattivata, l'email
- *      risulta non verificata e le sessioni sono invalidate (tokenVersion + 1);
- *    - ogni modifica e' registrata in `user_email_changes` (email e password originali)
- *      per un eventuale merge manuale e per il `down`. La tabella nasce solo se c'e'
- *      qualcosa da registrare: un database nuovo, o gia' in regola, non la riceve.
- * 3. Crea l'indice univoco su lower(email).
+ * 1. Normalizes the existing emails (trim + lowercase).
+ * 2. Handles duplicates (same email apart from case/spaces) WITHOUT losing data:
+ *    - the most trustworthy account stays "canonical": first the one with a verified email,
+ *      then the one with Google linked, then the oldest;
+ *    - the others are NOT deleted: the row stays (permissions and data included), but
+ *      the email becomes `local+dup-<n>-<id>@domain` (<n> = position in the group, so it is unique),
+ *      the password is disabled, the email is marked unverified and the sessions are
+ *      invalidated (tokenVersion + 1);
+ *    - every change is recorded in `user_email_changes` (original email and password)
+ *      for a possible manual merge and for `down`. The table is only created when there is
+ *      something to record: a new or already tidy database does not get it.
+ * 3. Creates the unique index on lower(email).
  *
- * Nota: TypeORM non sa descrivere indici su espressione ne conosce la tabella di
- * archivio: `migration:generate` li ignora (verificato), quindi non vanno dichiarati
- * nelle entita' e non compaiono come differenze.
+ * Note: TypeORM can neither describe expression indexes nor knows the archive table:
+ * `migration:generate` ignores them (verified), so they must not be declared in the
+ * entities and they do not show up as differences.
  */
 export class NormalizeEmails1794874500000 implements MigrationInterface {
   name = 'NormalizeEmails1794874500000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Un duplicato case-insensitive ha per forza almeno un'email non normalizzata (l'unicita'
-    // esatta sull'email esiste gia'), quindi basta guardare questo.
+    // A case-insensitive duplicate necessarily has at least one non-normalized email (exact
+    // uniqueness on the email already exists), so looking at this is enough.
     const [{ dirty }] = (await queryRunner.query(
       `SELECT EXISTS (SELECT 1 FROM "users" WHERE "email" <> lower(btrim("email"))) AS dirty`,
     )) as { dirty: boolean }[];
@@ -33,7 +34,7 @@ export class NormalizeEmails1794874500000 implements MigrationInterface {
       await this.archiveAndNormalize(queryRunner);
     }
 
-    // Vincolo: nessun duplicato case-insensitive, nemmeno con SQL diretto.
+    // Constraint: no case-insensitive duplicates, not even with direct SQL.
     await queryRunner.query(
       `CREATE UNIQUE INDEX "UQ_users_email_lower" ON "users" (lower("email"))`,
     );
@@ -55,7 +56,7 @@ export class NormalizeEmails1794874500000 implements MigrationInterface {
       )
     `);
 
-    // 1) Duplicati: archivia (con i dati da ripristinare) e rinomina.
+    // 1) Duplicates: archive (with the data needed to restore them) and rename.
     await queryRunner.query(`
       INSERT INTO "user_email_changes"
         ("userId", "originalEmail", "newEmail", "reason", "canonicalUserId",
@@ -92,7 +93,7 @@ export class NormalizeEmails1794874500000 implements MigrationInterface {
        WHERE c."userId" = u.id AND c."reason" = 'duplicate'
     `);
 
-    // 2) Tutti gli altri: solo normalizzazione (con registro della modifica).
+    // 2) Everyone else: normalization only (with a record of the change).
     await queryRunner.query(`
       INSERT INTO "user_email_changes" ("userId", "originalEmail", "newEmail", "reason")
       SELECT u.id, u.email, lower(btrim(u.email)), 'normalized'
@@ -107,15 +108,15 @@ export class NormalizeEmails1794874500000 implements MigrationInterface {
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP INDEX "public"."UQ_users_email_lower"`);
 
-    // Senza registro non c'e' nulla da ripristinare (database nuovo o gia' in regola).
+    // Without an archive there is nothing to restore (new or already tidy database).
     const [{ archive }] = (await queryRunner.query(
       `SELECT to_regclass('public.user_email_changes') IS NOT NULL AS archive`,
     )) as { archive: boolean }[];
     if (!archive) return;
 
-    // Ripristino in DUE fasi: il vincolo di unicita' esatto sull'email e' controllato riga per
-    // riga, quindi prima si rimettono le email originali degli account canonici/normalizzati
-    // (che oggi occupano la forma minuscola) e solo dopo quelle dei duplicati.
+    // Restore in TWO phases: the exact uniqueness constraint on the email is checked row by
+    // row, so first the original emails of the canonical/normalized accounts are put back
+    // (they now hold the lowercase form) and only then those of the duplicates.
     await queryRunner.query(`
       UPDATE "users" u
          SET "email" = c."originalEmail"

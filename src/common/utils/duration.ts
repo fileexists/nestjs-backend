@@ -7,10 +7,10 @@ const UNITS_MS: Record<string, number> = {
   w: 604_800_000,
 };
 
-/** Formato accettato per le durate configurabili (es. "15m", "7d"). */
+/** Format accepted for the configurable durations (e.g. "15m", "7d"). */
 export const DURATION_PATTERN = /^(\d+)(ms|s|m|h|d|w)$/;
 
-/** Converte "15m" / "7d" in millisecondi. Ritorna 0 se il formato non e' valido. */
+/** Converts "15m" / "7d" to milliseconds. Returns 0 if the format is not valid. */
 export function parseDurationMs(duration: string): number {
   const match = DURATION_PATTERN.exec(duration);
   if (!match) return 0;

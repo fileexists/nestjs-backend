@@ -14,10 +14,10 @@ import {
 const DEFAULT_EMAIL_VERIFICATION_TTL = '24h';
 const DEFAULT_PASSWORD_RESET_TTL = '1h';
 
-/** Attese tra un tentativo e il successivo: 3 tentativi in tutto. */
+/** Waits between one attempt and the next: 3 attempts in total. */
 export const MAIL_RETRY_DELAYS_MS = [2_000, 10_000];
 
-/** Errori di rete o risposte 4xx dell'SMTP: ha senso riprovare. Il resto (5xx, auth) no. */
+/** Network errors or SMTP 4xx responses: worth retrying. Everything else (5xx, auth) is not. */
 const TRANSIENT_CODES = new Set([
   'ETIMEDOUT',
   'ECONNECTION',
@@ -42,10 +42,10 @@ export function isTransientMailError(error: unknown): boolean {
 }
 
 /**
- * Invio email via SMTP (SMTP_HOST/SMTP_PORT; in sviluppo Mailpit su mailpit:1025).
- * I link puntano SEMPRE al frontend configurato (prima origine di FRONTEND_URL):
- * il frontend legge il token e chiama l'API in POST, cosi' gli scanner di posta
- * che aprono i link in GET non consumano il token monouso.
+ * Sends email via SMTP (SMTP_HOST/SMTP_PORT; in development Mailpit on mailpit:1025).
+ * Links ALWAYS point to the configured frontend (first origin of FRONTEND_URL):
+ * the frontend reads the token and calls the API with POST, so mail scanners
+ * that open links with GET do not consume the single-use token.
  */
 @Injectable()
 export class MailService {
@@ -98,7 +98,7 @@ export class MailService {
     await this.send(to, passwordResetEmail(link, this.passwordResetTtlMs));
   }
 
-  /** Avviso a chi possiede l'indirizzo: qualcuno ha provato a registrarlo di nuovo. */
+  /** Notice to whoever owns the address: someone tried to register it again. */
   async sendRegistrationNotice(to: string): Promise<void> {
     await this.send(
       to,
@@ -120,13 +120,13 @@ export class MailService {
     for (let attempt = 0; ; attempt++) {
       try {
         await this.transporter.sendMail(message);
-        this.logger.log(`Email "${content.subject}" inviata`);
+        this.logger.log(`Email "${content.subject}" sent`);
         return;
       } catch (error) {
         const delay = MAIL_RETRY_DELAYS_MS[attempt];
         if (delay === undefined || !isTransientMailError(error)) throw error;
         this.logger.warn(
-          `Invio email non riuscito (${error instanceof Error ? error.message : String(error)}), riprovo tra ${delay / 1000}s`,
+          `Sending the email failed (${error instanceof Error ? error.message : String(error)}), retrying in ${delay / 1000}s`,
         );
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
