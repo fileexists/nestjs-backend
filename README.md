@@ -39,7 +39,7 @@ A production-ready authentication backend built with **NestJS 12**, **TypeORM**,
 │   ├── migrations/          # TypeORM migrations
 │   └── seeds/               # Database seeders
 ├── docs/
-│   └── PROGETTO.md          # design: Bearer API keys for the public widget (not implemented)
+│   └── PROJECT.md           # design: Bearer API keys for the public widget (not implemented)
 ├── scripts/
 │   └── test-api.sh          # cURL integration tests
 ├── src/
